@@ -1,14 +1,18 @@
+
 module Lidar_ACM (
 input logic clk_i, 
 input logic rstn_i,
 input logic valid_DDM_i,
-input logic ready_CCM_i,
-input logic valid_CCM_i,
+input logic ready_fs1_CCM_i,
+input logic ready_fs2_CCM_i,
+input logic valid_fs1_CCM_i,
+input logic valid_fs2_CCM_i,
 input logic [15:0]azimuth_i, 
 output logic signed [17:0] cosa1_o, sina1_o, sina2_o, cosa2_o,
-output logic valid1_ACM_o,
-output logic valid2_ACM_o,
-output logic ready_ACM_o
+output logic valid_fs1_ACM_o,
+output logic valid_fs2_ACM_o,
+output logic ready_fs1_ACM_o,
+output logic ready_fs2_ACM_o
 );
 
 typedef enum logic[2:0] {IDLE, START, COMPUTE1, RESULT1, COMPUTE2, RESULT2, WAIT_FOR_CCM} statetype; //cs means current_state, ns means next_state
@@ -22,13 +26,13 @@ end
 //RISORSE PER AZIMUTH PRE-PROCESSING, CALCOLO E PRE-PROCESSING DRIFT AZIMUTH 
 logic [15:0] azimuth_d, azimuth_q; //PER CAMPIONARE L'AZIMUTH IN INGRESSO
 logic [15:0] drift_azimuth_d, drift_azimuth_q; //AZIMUTH SECONDO FIRING OTTENUTO COME BASE+OFFSET
-localparam logic [4:0] DRIFT_OFFSET=5'd20; //RISOLUZIONE ANGOLARE, DIPENDE DA RPM, ASSUNZIONE RPM=600
+localparam logic [4:0] DRIFT_OFFSET=5'd20; //RISOLUZIONE ANGOLARE, ASSUNZIONE RPM=600
 
 logic [15:0] angle_translated; //ANGOLO TRASLATO AL PRIMO QUADRANTE
-logic signed [14:0] angle_cordic; //ANGOLO DA ADEGUARE ALLA DINAMICA DEL CORDIC 
+logic signed [14:0] angle_cordic; //ANGOLO NELLA DINAMICA DEL CORDIC 
 
-logic [1:0] quadrante_fs1_d, quadrante_fs1_q; //QUADRANTE INIZIALE AZIMUTH, PER LE COORDINATE DEL PRIMO FIRING 
-logic [1:0] quadrante_fs2_d, quadrante_fs2_q; //-- DRIFT AZIMUTH, PER LE COORDINATE DEL SECONDO FIRING
+logic [1:0] quadrante_fs1_d, quadrante_fs1_q; //QUADRANTE INIZIALE AZIMUTH DEL PRIMO FIRING
+logic [1:0] quadrante_fs2_d, quadrante_fs2_q; //-- DRIFT AZIMUTH DEL SECONDO FIRING
 localparam logic [15:0] QI=16'd9000;
 localparam logic [15:0] QII=16'd18000;
 localparam logic [15:0] QIII=16'd27000;
@@ -36,10 +40,10 @@ localparam logic [15:0] QIV=16'd36000;
 
  
 //RISORSE CORDIC 
-localparam logic signed[4:0] MULTIPLIER=5'sd10;
+localparam logic signed [4:0] MULTIPLIER=5'sd10;
 localparam logic signed [16:0] X_GAIN=17'sd60725;
 
-logic signed [19:0] z_d, z_q; //Z0=angle_cordic*MULTIPLIER=> 20bit signed � il max valore, poi converge a zero
+logic signed [19:0] z_d, z_q; //Z0=angle_cordic*MULTIPLIER=> 20bit signed   il max valore, poi converge a zero
 logic signed [18:0] x_d, x_q, y_d, y_q, y_shifted, x_shifted;
 logic signed [17:0] cosa1_q, cosa1_d, sina1_q, sina1_d, cosa2_d, cosa2_q, sina2_d, sina2_q;
 
@@ -54,56 +58,65 @@ if(cs==COMPUTE1 || cs==COMPUTE2 ) iter_d=iter_q+5'd1;
 end
 
 logic signed [15:0] [19:0] LUT_rotation_angle; 
-assign LUT_rotation_angle = {20'sd1/*LUT[15]*/, 20'sd3, 20'sd6, 20'sd13, 20'sd27, 20'sd55, 20'sd111, 20'sd223, 
+assign LUT_rotation_angle = {20'sd1, 20'sd3, 20'sd6, 20'sd13, 20'sd27, 20'sd55, 20'sd111, 20'sd223, 
 20'sd447, 20'sd895, 20'sd1789, 20'sd3576, 20'sd7125, 20'sd14036, 20'sd26565, 20'sd45000 /*LUT[0]*/}; 
 
 //FSM
 always_comb begin
 ns=cs;
-valid1_ACM_o=1'd0;
-valid2_ACM_o=1'd0;
-ready_ACM_o=1'd0; 
+valid_fs1_ACM_o=1'd0;
+valid_fs2_ACM_o=1'd0;
+ready_fs1_ACM_o=1'd1; 
+ready_fs2_ACM_o=1'd1;
 
 case(cs) 
-	IDLE: begin 
-		ready_ACM_o=1'd1; //IN ATTESA DELL'AZIMUTH DA DDM 
-		if(valid_DDM_i) ns=START; //NELLO STESSO PERIODO TROVO IL QUADRANTE DELL'AZIMUTH E CALCOLO IL DRIFT_AZIMUTH
+	IDLE: begin  //IN ATTESA DI VALID_DDM=1 PER CAMPIONARE L'INGRESSO ED INIZIARE IL PROCESSO DI CALCOLO
+		if(valid_DDM_i) ns=START;
 	end
 	START: begin
+		ready_fs1_ACM_o=1'd0; 
 		ns=COMPUTE1;
 	end
 	COMPUTE1: begin
-		//Si rimane nello stato per 17 cicli di clock, da iter_q=0 in cui inizializzo i regsitri a iter_q=16 in cui si arriva alla convergenza di x=cos, y=sin
-		if (iter_q==5'd16) ns=RESULT1; 
+		ready_fs1_ACM_o=1'd0; 
+		//ITER_Q=0 INIZIALIZZO, ITER_Q=[1,16] ITERO IL CORDIC, ITER_Q=17 POST-PROCESSING
+		if (iter_q==5'd17) ns=RESULT1; 
 	end
-	RESULT1: begin //Impiega un periodo, si effettua la traslazione del risultato Cordic al quadrante di appartenenza, si fa il pre-processing  sul drift_azimuth
-		valid1_ACM_o=1'd1; //handshake con CCM che inizia la conversione del primo firing con la coppia {sina1, cosa1}
+	RESULT1: begin //I REGISTRI {SINA1, COSA1}CONTENGONO IL VALORE DA USARE NELLA CONVERSIONE DEL PRIMO FIiRNG
+		ready_fs2_ACM_o=1'd0;
+		valid_fs1_ACM_o=1'd1; //handshake con CCM che inizia la conversione del primo firing
 		ns=COMPUTE2;
 	end
-	COMPUTE2: begin // Si rimane per 17 cicli come in compute1, cambia solo il contenuto con cui si inizializza il registro accumulatore z
-		valid1_ACM_o=1'd1;
-		if(iter_q==5'd16) ns=RESULT2; 
+	COMPUTE2: begin // ITER_Q=0 INIZIALIZZO, ITER_Q=[1,16] ITERO IL CORDIC, ITER_Q=17 POST-PROCESSING
+		valid_fs1_ACM_o=1'd1;
+		ready_fs2_ACM_o=1'd0;
+		if(iter_q==5'd17) ns=RESULT2; 
 	end
 	RESULT2: begin
-		valid2_ACM_o=1'd1; //handshake con CCM per notificare che la coppia {sina2, cosa2} pu� essere usata nel calcolo delle coordinate del secondo firing
-		valid1_ACM_o=1'd1; 
-		ns=WAIT_FOR_CCM; //handshake da CCM, quando CCM ha calcolato l'ultimo data point del data_block lo notifica ed entrambe le fsm tornano in IDLE
+		valid_fs2_ACM_o=1'd1; //handshake con CCM per notificare che la coppia {sina2, cosa2} pu  essere usata nel calcolo delle coordinate del secondo firing
+		valid_fs1_ACM_o=1'd1; 
+		if(valid_fs2_CCM_i) ns=IDLE;
+		else if(valid_fs2_CCM_i==1'd0) ns=WAIT_FOR_CCM; //handshake da CCM, quando CCM ha calcolato l'ultimo data point del data_block lo notifica ed entrambe le fsm tornano in IDLE
 	end
 	WAIT_FOR_CCM: begin
-		valid2_ACM_o=1'd1;
-		valid1_ACM_o=1'd1;
-		if(valid_CCM_i) ns=IDLE;
+		valid_fs2_ACM_o=1'd1; 
+		valid_fs1_ACM_o=1'd1;
+		if(valid_fs2_CCM_i) ns=IDLE;
 	end
 endcase
 end
 
-// QUADRANTE AZIMUTH
+// BLOCCO IN CUI CAMPIONO L'AZIMUTH 
 always_comb begin 
-quadrante_fs1_d=quadrante_fs1_q;
 azimuth_d=azimuth_q;
+if(valid_DDM_i & cs==IDLE) azimuth_d=azimuth_i; //VA BENE COS ? O LO DEVO METTERE COME SEGNALE DI ENABLE SINCRONO DEL FF ?
+else if(valid_DDM_i) azimuth_d=azimuth_i;
+end 
 
-if(valid_DDM_i & cs==IDLE) azimuth_d=azimuth_i; //VA BENE COS�? O LO DEVO METTERE COME SEGNALE DI ENABLE SINCRONO DEL FF ?
-else if(cs==START) begin
+//PRE-PROCESSING AZIMUTH
+always_comb begin
+quadrante_fs1_d=quadrante_fs1_q;
+if(cs==START) begin
 	if(azimuth_q>QIII) quadrante_fs1_d=2'd3;
 	else if(azimuth_q>QII) quadrante_fs1_d=2'd2;
 	else if(azimuth_q>QI) quadrante_fs1_d=2'd1;
@@ -111,17 +124,20 @@ else if(cs==START) begin
 	end
 end
 
-//CALCOLO DRIFT AZIMUTH E QUADRANTE
+//CALCOLO DRIFT AZIMUTH 
+always_comb begin
+drift_azimuth_d=drift_azimuth_q;
+if(cs==START) drift_azimuth_d=azimuth_q+DRIFT_OFFSET;
+else if (cs==COMPUTE1 && iter_q==5'd0) begin //CONTROLLO CHE NON ECCEDA I 360  
+	if(drift_azimuth_q>QIV)
+	drift_azimuth_d=drift_azimuth_q-QIV; //WRAP AROUND CON RESIDUO 
+	end
+end
+
+//PRE-PROCESSING DRIFT AZIMUTH
 always_comb begin
 quadrante_fs2_d=quadrante_fs2_q;
-drift_azimuth_d=drift_azimuth_q;
-
-if(cs==START) drift_azimuth_d=azimuth_q+DRIFT_OFFSET;
-else if (cs==COMPUTE1 && iter_q==5'd0) begin
-	if(drift_azimuth_q>QIV)
-	drift_azimuth_d=drift_azimuth_q-QIV; //SE SUPERO 360� FACCIO UN GIRO COMPLETO SULLA CIRCONFERENZA 
-	end
-else if (cs==RESULT1) begin //inidividuo il quadranate
+ if (cs==RESULT1) begin
 	if(drift_azimuth_q>QIII) quadrante_fs2_d=2'd3;
 	else if(drift_azimuth_q>QII) quadrante_fs2_d=2'd2;
 	else if(drift_azimuth_q>QI) quadrante_fs2_d=2'd1;
@@ -129,9 +145,9 @@ else if (cs==RESULT1) begin //inidividuo il quadranate
 	end
 end
 
-// modello cordic con 17 iterazioni
+// CORDIC 18 CICLI
 always_comb begin
-shifter=4'd0;
+shifter=5'd0;
 angle_translated=16'd0;
 angle_cordic=15'sd0;
 y_shifted=19'sd0;
@@ -140,7 +156,7 @@ z_d=z_q;
 x_d=x_q;
 y_d=y_q;
 
-if(cs==COMPUTE1 && iter_q==5'd0) begin //INIZIALIZZO I REGISTRI DEL FIRING1
+if(iter_q==5'd0 && cs==COMPUTE1) begin //INIZIALIZZO I REGISTRI DEL FIRING1
 	x_d=X_GAIN;
 	y_d=19'sd0;
 	case(quadrante_fs1_q) 
@@ -160,7 +176,7 @@ if(cs==COMPUTE1 && iter_q==5'd0) begin //INIZIALIZZO I REGISTRI DEL FIRING1
 	angle_cordic=angle_translated[14:0];
 	z_d=angle_cordic*MULTIPLIER;
 	end
-else if(cs==COMPUTE2 && iter_q==5'd0) begin //INIZIALIZZO REGISTRI DEL FIRING 2
+else if(iter_q==5'd0 && cs==COMPUTE2) begin //INIZIALIZZO REGISTRI DEL FIRING 2
 	x_d=X_GAIN;
 	y_d=19'sd0;
 	case(quadrante_fs2_q) 
@@ -180,15 +196,15 @@ else if(cs==COMPUTE2 && iter_q==5'd0) begin //INIZIALIZZO REGISTRI DEL FIRING 2
 	angle_cordic=angle_translated[14:0];
 	z_d=angle_cordic*MULTIPLIER;
 end
-else if (cs==COMPUTE1 || cs==COMPUTE2) begin
-	shifter=iter_q-5'd1; 
+else if (iter_q<=5'd16) begin
+	shifter=iter_q-5'd1;
 	y_shifted=y_q>>>shifter;
 	x_shifted=x_q>>>shifter;
-	if (z_q[19]==17'd1) begin
+	if (z_q[19]==1'd1 ) begin
 		x_d=x_q+y_shifted;
 		y_d=y_q-x_shifted;
 		z_d=z_q+LUT_rotation_angle[shifter];
-	end else begin
+	end else if(z_q[19]==1'd0)begin
 		x_d=x_q-y_shifted;
 		y_d=y_q+x_shifted;
 		z_d=z_q-LUT_rotation_angle[shifter];
@@ -196,14 +212,14 @@ else if (cs==COMPUTE1 || cs==COMPUTE2) begin
 end
 end
 
-//per ri-trsalare il risultato del cordic al quadrante di partenza 
+//POST-PROCESSING
 always_comb begin
 cosa1_d=cosa1_q;
 sina1_d=sina1_q;
 cosa2_d=cosa2_q;
 sina2_d=sina2_q;
 
-if(cs==RESULT1) begin
+if(iter_q==5'd17 && cs==COMPUTE1) begin //FIRST COUPLE
 	case(quadrante_fs1_q) 
 		2'd0:  begin
 			cosa1_d=x_q[17:0];
@@ -223,8 +239,8 @@ if(cs==RESULT1) begin
 			end
 		endcase
 end
-else if(cs==RESULT2) begin
-	case(quadrante_fs2_q) //traslo il risultato del cordic 
+else if(iter_q==5'd17 && cs==COMPUTE2) begin //SECOND COUPLE
+	case(quadrante_fs2_q) 
 		2'd0:  begin
 			cosa2_d=x_q[17:0];
 			sina2_d=y_q[17:0];
@@ -245,17 +261,19 @@ else if(cs==RESULT2) begin
 	end
 end
 
+
 always_ff@(posedge clk_i, negedge rstn_i) begin
 if(~rstn_i) begin
  cosa1_q<='0;
  sina1_q<='0;
  cosa2_q<='0;
  sina2_q<='0;
+
  end
 else begin
 cosa1_q<=cosa1_d; //cosa1_q<=
 sina1_q<=sina1_d;
-cosa2_q<=cosa2_d;
+cosa2_q<=cosa2_d; //cosa1_q<=
 sina2_q<=sina2_d;
 end
 end
