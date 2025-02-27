@@ -1,5 +1,5 @@
 
-module Lidar_Top_Level(
+module Lidar_top_level(
 input logic rstn_i, 
 input logic clk_i, 
 input logic [3:0] channel_ID_i,
