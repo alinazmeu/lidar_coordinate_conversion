@@ -1,4 +1,5 @@
-QUESTA ?= questa-2023.4
+QUESTA ?= 
+BENDER ?= ./bender
 
 mkfile_path	:= $(dir $(abspath $(firstword $(MAKEFILE_LIST))))
 BUILD_DIR	?= $(mkfile_path)/sim/build
@@ -17,12 +18,13 @@ bender:
 
 # Generate simulation scripts
 gen_sim_scripts:
-	bender script vsim \
+	mkdir -p sim; \
+	$(BENDER) script vsim \
 	-t rtl -t test > sim/compile.tcl
 
 # Generate Synopsys DC scripts
 gen_synth_scripts:
-	bender script synopsys \
+	$(BENDER) script synopsys \
 	-t rtl -t synthesis > gf22/synopsys/scripts/analyze.tcl
 
 # Build implicit rules
