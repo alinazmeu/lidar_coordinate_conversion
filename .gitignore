@@ -1,0 +1,7 @@
+.bender
+bender
+Bender.lock
+sim/*
+modelsim.ini
+*.wlf
+transcript

@@ -1,0 +1,16 @@
+package:
+  name: lidar_coordinate_conversion
+  authors: ["Alina Zmeu <alina.zmeu@studio.unibo.it>"]
+
+sources:
+  - target: any(rtl,synthesis,test)
+    files:
+      - rtl/Lidar_ACM.sv
+      - rtl/Lidar_CCM.sv
+      - rtl/Lidar_top_level.sv
+  - target: all(test, not(synthesis))
+    files:
+      - tb/load_stim_pkg.sv
+      - tb/TB_Lidar_ACM.sv
+      - tb/TB_Lidar_CCM.sv
+      - tb/TB_Lidar_top_level.sv
