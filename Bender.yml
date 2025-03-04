@@ -11,6 +11,7 @@ sources:
   - target: all(test, not(synthesis))
     files:
       - tb/load_stim_pkg.sv
+      - tb/write_out_pkg.sv
       - tb/TB_Lidar_ACM.sv
       - tb/TB_Lidar_CCM.sv
       - tb/TB_Lidar_top_level.sv

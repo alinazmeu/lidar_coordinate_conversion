@@ -4,6 +4,7 @@
 module TB_Lidar_top_level();
 
 import load_stim_pkg::*;
+import write_out_pkg::*;
 
 logic clk_i;
 logic rstn_i;
@@ -56,17 +57,16 @@ end
 logic [15:0] azimuth[$];
 logic [15:0] distance[$];
 
+// Declare output vectors
+logic signed [17:0] x[$], y[$], z[$];
+
 // Load stimuli from .txt files
 initial begin
 	load_azimuth("../tb/stimuli/azimuth.txt", azimuth);
 	load_distance("../tb/stimuli/distance.txt", distance);
-	//load_distance("../tb/stimuli/distance.txt", distance);
 end
 
 assign length_sim = $bits(distance)/16; //$bits(variable) returns the total number of bits in a variable, not its size or element count, assign requires constant sized variables
-/*always @(*) begin
-lenght_sim=($size(distance)+15)/16; //returns the number of elements in the dynamic array
-end*/
 
 initial begin
 	clk_i='0;
@@ -83,6 +83,7 @@ initial begin
 	
 end
 
+// Display facilities
 /*initial begin
 	while(idx<length_sim) begin
 		wait(valid_fs1_ACM_o) 
@@ -107,50 +108,71 @@ end*/
 
 initial begin
 
-wait(rstn_i)
-@(posedge clk_i); 
-valid_DDM_i=1'd1; //ACM goes to COMPUTE1
-azimuth_i = azimuth[array_idx];
-@(posedge clk_i); //ACM in COMPUTE1
-valid_DDM_i='0;
-
-while(array_idx<length_sim) begin //loop per un data_packet
-
-	wait(valid_fs1_ACM_o) //ACM in RESULT1, CCM goes to COMPUTE1
-	@(posedge clk_i); //CCM in COMPUTE1 
-	valid_dp_DDM_i=1'd1;
-	while(id<=15) begin
-		channel_ID_i=id;
-		distance_i=distance[array_idx];
-		id++;
-		array_idx++;
-		@(posedge clk_i); 
-	end
-	id=0; 
+	wait(rstn_i)
 	@(posedge clk_i); 
-	wait(valid_fs2_ACM_o)
-
-	@(posedge clk_i); // CCM goes to COMPUTE2
-	while(id<=15) begin
-		wait(cs_compute)
-		channel_ID_i=id;
-		distance_i=distance[array_idx];
-		@(posedge clk_i);
-		id++;
-		array_idx++; 
-	end
-	id=0;
-	valid_dp_DDM_i='0;
-	@(posedge clk_i); //finished data point
-	@(posedge clk_i); //ACM e CCM in IDLE, ACM goes to COMPUTE1
-	if(array_idx < length_sim) begin
-		valid_DDM_i=1'd1;
-		azimuth_i = azimuth[array_idx];
-	end
-
+	valid_DDM_i=1'd1; //ACM goes to COMPUTE1
+	azimuth_i = azimuth[array_idx];
 	@(posedge clk_i); //ACM in COMPUTE1
 	valid_DDM_i='0;
+
+	while(array_idx<length_sim) begin //loop per un data_packet
+
+		wait(valid_fs1_ACM_o) //ACM in RESULT1, CCM goes to COMPUTE1
+		@(posedge clk_i); //CCM in COMPUTE1 
+		valid_dp_DDM_i=1'd1;
+		while(id<=15) begin
+			channel_ID_i=id;
+			distance_i=distance[array_idx];
+			id++;
+			array_idx++;
+			@(posedge clk_i); 
+		end
+		id=0; 
+		@(posedge clk_i); 
+		wait(valid_fs2_ACM_o)
+
+		@(posedge clk_i); // CCM goes to COMPUTE2
+		while(id<=15) begin
+			wait(cs_compute)
+			channel_ID_i=id;
+			distance_i=distance[array_idx];
+			@(posedge clk_i);
+			id++;
+			array_idx++; 
+		end
+		id=0;
+		valid_dp_DDM_i='0;
+		@(posedge clk_i); //finished data point
+		@(posedge clk_i); //ACM e CCM in IDLE, ACM goes to COMPUTE1
+		if(array_idx < length_sim) begin
+			valid_DDM_i=1'd1;
+			azimuth_i = azimuth[array_idx];
+		end
+
+		@(posedge clk_i); //ACM in COMPUTE1
+		valid_DDM_i='0;
+	end
+	$stop;
 end
-$stop;
+
+// Output acquisition and export
+initial begin
+	int out_idx = 0;
+	
+	while (out_idx < length_sim) begin
+		@(posedge clk_i);
+		if(valid_dp_CCM_o) begin
+			x[out_idx] = x_o;
+			y[out_idx] = y_o;
+			z[out_idx] = z_o;
+
+			out_idx++;
+		end
+	end
+
+	write_x_out(x, "x_out.txt");
+	write_y_out(y, "y_out.txt");
+	write_z_out(z, "z_out.txt");
 end
+
 endmodule
