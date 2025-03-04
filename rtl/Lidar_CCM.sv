@@ -132,11 +132,15 @@ else valid_dp_CCM_o<=valid_dp_in;
 end
 always_comb begin
 valid_dp_in=1'd0;
-if(cs==COMPUTE1 || cs==COMPUTE2) begin
-if(valid_dp_DDM_i) valid_dp_in=1'd1;
+if(cs==COMPUTE1) begin
+	if(cs != ns)
+		valid_dp_in = 1'b0;
+	else
+		valid_dp_in = valid_dp_DDM_i;
+end else if(cs==COMPUTE2) begin
+		valid_dp_in = valid_dp_DDM_i;
+	end
 end
-end
-
 
 //Il calcolo delle coordinate avviene in parallelo, implemento un always_comb per ogni coordinata
 assign distance=signed'(distance_i<<1);
