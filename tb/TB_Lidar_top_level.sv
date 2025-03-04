@@ -37,7 +37,8 @@ Lidar_top_level DUT(
 int length_sim;
 int id=0;
 int array_idx = 0;
-//int distance;
+int idx=0;
+
 // Declare stimuli vectors
 logic [15:0] azimuth[$];
 logic [15:0] distance[$];
@@ -66,19 +67,18 @@ initial begin
 end
 
 initial begin
-	int idx=0;
 	while(idx<length_sim) begin
-		wait(valid_fs1_ACM_o)
+		wait(valid_fs1_ACM_o) 
 		repeat(3) @(posedge clk_i);
 		$display("azimuth%d", azimuth_i);
 		for(int i=0; i<=15; i++) begin
-			$display("ID:%d, Distance:%d, x:%d, y:%d, z=%d",i, distance[idx], x_o,y_o,z_o);
+			$display("ID:%d, Distance:%d, x:%d, y:%d, z:%d",i, distance[idx], x_o,y_o,z_o);
 			@(posedge clk_i);
 			idx++;
 		end
 
 		wait(valid_fs2_ACM_o)
-		repeat(2) @(posedge clk_i);
+		repeat(3) @(posedge clk_i);
 		for(int i=0; i<=15; i++) begin
 			$display("ID:%d, Distance:%d, x:%d, y:%d, z=%d",i, distance[idx], x_o,y_o,z_o);
 			@(posedge clk_i);
@@ -91,35 +91,43 @@ end
 initial begin
 
 wait(rstn_i)
-@(posedge clk_i);
-valid_DDM_i=1'd1;
-//azimuth_i=$urandom_range(36000); //if ready ccm
-azimuth_i = azimuth[0];
+@(posedge clk_i); 
+valid_DDM_i=1'd1; //ACM goes to COMPUTE1
+azimuth_i = azimuth[array_idx];
 
-@(posedge clk_i);
+@(posedge clk_i); //ACM in COMPUTE1
 valid_DDM_i='0;
 
+while(array_idx<length_sim) begin
+	wait(valid_fs1_ACM_o) 
+	@(posedge clk_i); //CCM in COMPUTE1
+		while(id<=15) begin
+			channel_ID_i=id;
+			distance_i=distance[array_idx];
+			id++;
+			array_idx++;
+			@(posedge clk_i); //id=15 CCM goes to VALID1 
+		end
+	id=0; 
+	@(posedge clk_i); //CCM in VALID2
+	wait(valid_fs2_ACM_o) //CCM goes to COMPUTE2
+	@(posedge clk_i); // CCM in COMPUTE2
 
-wait(valid_fs1_ACM_o)
-@(posedge clk_i); //vado in compute1 ed inizio la conversione 
-while(id<=length_sim) begin
-channel_ID_i=id;
-distance_i=distance[array_idx];
-id++;
-array_idx++;
-@(posedge clk_i);
-end
-id=0; 
+		while(id<=15) begin
+			channel_ID_i=id;
+			distance_i=distance[array_idx];
+			@(posedge clk_i);
+			id++;
+			array_idx++; //id=15 CCM goes to VALID2
+		end
+	id=0;
+	@(posedge clk_i); //CCM in VALID2
+	@(posedge clk_i); //CCM  e ACM in IDLE 
+	valid_DDM_i=1'd1; //ACM goes to COMPUTE1
+	azimuth_i=azimuth[array_idx];
+	@(posedge clk_i); //ACM in COMPUTE1
+	valid_DDM_i='0;
 
-wait(valid_fs2_ACM_o)
-
-@(posedge clk_i); // se ero in wait torno in compute2
-while(id<=length_sim) begin
-channel_ID_i=id;
-distance_i=distance[array_idx];
-@(posedge clk_i);
-id++;
-array_idx++;
 end
 repeat(5)@(posedge clk_i);
 
