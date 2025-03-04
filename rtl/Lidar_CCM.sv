@@ -70,7 +70,7 @@ end
 
 //conta i 32 dapa point di un data block
 logic[5:0] cnt_dp_d, cnt_dp_q;
-logic clear_cnt_dp=1'd0;
+logic clear_cnt_dp;
 
 always_ff@(posedge clk_i, negedge rstn_i) begin
 if(~rstn_i) cnt_dp_q<=6'd0;
@@ -91,6 +91,7 @@ valid_fs1_CCM_o=1'd0;
 valid_fs2_CCM_o=1'd0;
 ready_fs1_CCM_o=1'd1;
 ready_fs2_CCM_o=1'd1;
+clear_cnt_dp = 1'b0;
 if(cnt_dp_q==6'd16 && cs==COMPUTE1) valid_fs1_CCM_o=1'd1;
 if(cnt_dp_q==6'd32 && cs==COMPUTE2) valid_fs2_CCM_o=1'd1;
 case(cs) 

@@ -44,18 +44,26 @@ int id=0;
 int array_idx = 0;
 int idx=0;
 
+logic cs_compute;
+initial begin
+	if(valid_fs1_ACM_o)
+	@(posedge clk_i);
+	cs_compute=1;
+end
+
+
 // Declare stimuli vectors
 logic [15:0] azimuth[$];
 logic [15:0] distance[$];
 
 // Load stimuli from .txt files
 initial begin
-	load_azimuth("./stimuli/azimuth.txt", azimuth);
-	load_distance("./stimuli/distance.txt", distance);
+	load_azimuth("../tb/stimuli/azimuth.txt", azimuth);
+	load_distance("../tb/stimuli/distance.txt", distance);
 	//load_distance("../tb/stimuli/distance.txt", distance);
 end
 
-assign length_sim = $size(distance); //$bits(variable) returns the total number of bits in a variable, not its size or element count, assign requires constant sized variables
+assign length_sim = $bits(distance)/16; //$bits(variable) returns the total number of bits in a variable, not its size or element count, assign requires constant sized variables
 /*always @(*) begin
 lenght_sim=($size(distance)+15)/16; //returns the number of elements in the dynamic array
 end*/
@@ -75,7 +83,7 @@ initial begin
 	
 end
 
-initial begin
+/*initial begin
 	while(idx<length_sim) begin
 		wait(valid_fs1_ACM_o) 
 		repeat(3) @(posedge clk_i);
@@ -94,7 +102,7 @@ initial begin
 			idx++;
 		end
 	end
-end
+end*/
 
 
 initial begin
@@ -106,35 +114,39 @@ azimuth_i = azimuth[array_idx];
 @(posedge clk_i); //ACM in COMPUTE1
 valid_DDM_i='0;
 
-while(array_idx<=length_sim) begin //loop per un data_packet
+while(array_idx<length_sim) begin //loop per un data_packet
 
 	wait(valid_fs1_ACM_o) //ACM in RESULT1, CCM goes to COMPUTE1
 	@(posedge clk_i); //CCM in COMPUTE1 
+	valid_dp_DDM_i=1'd1;
 	while(id<=15) begin
 		channel_ID_i=id;
 		distance_i=distance[array_idx];
 		id++;
 		array_idx++;
-		@(posedge clk_i); //id=15 CCM goes to VALID1
+		@(posedge clk_i); 
 	end
 	id=0; 
-	@(posedge clk_i); //CCM in VALID1
+	@(posedge clk_i); 
 	wait(valid_fs2_ACM_o)
 
 	@(posedge clk_i); // CCM goes to COMPUTE2
 	while(id<=15) begin
+		wait(cs_compute)
 		channel_ID_i=id;
 		distance_i=distance[array_idx];
 		@(posedge clk_i);
 		id++;
-		array_idx++; //id=15 CCM goes to VALID2
+		array_idx++; 
 	end
 	id=0;
-
-	@(posedge clk_i); //CCM in VALID2
+	valid_dp_DDM_i='0;
+	@(posedge clk_i); //finished data point
 	@(posedge clk_i); //ACM e CCM in IDLE, ACM goes to COMPUTE1
-	valid_DDM_i=1'd1;
-	azimuth_i = azimuth[array_idx];
+	if(array_idx < length_sim) begin
+		valid_DDM_i=1'd1;
+		azimuth_i = azimuth[array_idx];
+	end
 
 	@(posedge clk_i); //ACM in COMPUTE1
 	valid_DDM_i='0;
