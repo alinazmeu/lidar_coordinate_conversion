@@ -6,6 +6,7 @@ input logic valid_fs1_ACM_i,
 input logic valid_fs2_ACM_i,
 input logic ready_fs1_ACM_i,
 input logic ready_fs2_ACM_i,
+input logic valid_dp_DDM_i,
 input logic signed [17:0] sina1_i, cosa1_i, sina2_i, cosa2_i,
 input logic [3:0] channel_ID_i,
 input logic [15:0] distance_i,
@@ -13,6 +14,7 @@ output logic valid_fs1_CCM_o,
 output logic valid_fs2_CCM_o,
 output logic ready_fs1_CCM_o,
 output logic ready_fs2_CCM_o,
+output logic valid_dp_CCM_o,
 output logic signed [17:0] x_o, y_o, z_o
 );
 
@@ -58,12 +60,29 @@ assign LUT_Z = {-21'sd740_000, 21'sd90_000, -21'sd650_000, 21'sd180_000, -21'sd5
  -21'sd370_000, 21'sd460_000, -21'sd270_000, 21'sd550_000, -21'sd180_000, 21'sd650_000, -21'sd90_000, 21'sd740_000};
 
 //implemento una fsm 
-typedef enum logic[2:0] {IDLE, COMPUTE1, VALID1, COMPUTE2, VALID2, WAIT_FOR_ACM} statetype; //cs means current_state, ns means next_state
+typedef enum logic[2:0] {IDLE, COMPUTE1, COMPUTE2, WAIT_FOR_ACM} statetype; //cs means current_state, ns means next_state
 statetype cs, ns;
 
 always_ff @(posedge clk_i, negedge rstn_i) begin
 if(~rstn_i) cs<=IDLE;
 else cs<=ns;
+end
+
+//conta i 32 dapa point di un data block
+logic[5:0] cnt_dp_d, cnt_dp_q;
+logic clear_cnt_dp=1'd0;
+
+always_ff@(posedge clk_i, negedge rstn_i) begin
+if(~rstn_i) cnt_dp_q<=6'd0;
+else if (clear_cnt_dp) cnt_dp_q<=1'd0;
+else cnt_dp_q<=cnt_dp_d;
+end
+
+always_comb begin
+cnt_dp_d=cnt_dp_q;
+if(cs==COMPUTE1 || cs==COMPUTE2) begin
+	if(valid_dp_DDM_i) cnt_dp_d=cnt_dp_q+6'd1;
+end
 end
 
 always_comb begin
@@ -72,31 +91,49 @@ valid_fs1_CCM_o=1'd0;
 valid_fs2_CCM_o=1'd0;
 ready_fs1_CCM_o=1'd1;
 ready_fs2_CCM_o=1'd1;
+if(cnt_dp_q==6'd16 && cs==COMPUTE1) valid_fs1_CCM_o=1'd1;
+if(cnt_dp_q==6'd32 && cs==COMPUTE2) valid_fs2_CCM_o=1'd1;
 case(cs) 
 	IDLE:     begin
 		   if(valid_fs1_ACM_i) ns=COMPUTE1;
 	 end
 	COMPUTE1: begin
 		ready_fs1_CCM_o=1'd0;
-		 if(channel_ID_i==4'd15) ns=VALID1;
-	end
-	VALID1: begin
-		valid_fs1_CCM_o=1'd1;
-		if(valid_fs2_ACM_i) ns=COMPUTE2;
-		else ns=WAIT_FOR_ACM;
+		if(cnt_dp_q==6'd16) begin
+			if(valid_fs2_ACM_i==1'd0) ns=WAIT_FOR_ACM;
+			else ns=COMPUTE2;
+		
+		end
 	end
 	WAIT_FOR_ACM: begin
+		ready_fs2_CCM_o=1'd0;
+		valid_fs1_CCM_o=1'd1;
 		if(valid_fs2_ACM_i) ns=COMPUTE2;
 	end
 	COMPUTE2: begin
 		  ready_fs2_CCM_o=1'd0;
-		    if(channel_ID_i==4'd15) ns=VALID2;
-	end
-	VALID2: begin
-		 valid_fs2_CCM_o=1'd1;
-		ns=IDLE;
+		valid_fs1_CCM_o=1'd1;
+		    if(cnt_dp_q==6'd32) begin
+			ns=IDLE;
+		valid_fs2_CCM_o=1'd1;
+		clear_cnt_dp=1'd1;
+		end
 	end
 endcase
+end
+
+//per ogni data point in ingresso al ciclo successivo si alza il valid
+logic valid_dp_in;
+
+always_ff@(posedge clk_i, negedge rstn_i) begin
+if(~rstn_i) valid_dp_CCM_o<=1'd0;
+else valid_dp_CCM_o<=valid_dp_in;
+end
+always_comb begin
+valid_dp_in=1'd0;
+if(cs==COMPUTE1 || cs==COMPUTE2) begin
+if(valid_dp_DDM_i) valid_dp_in=1'd1;
+end
 end
 
 
@@ -108,11 +145,13 @@ always_comb begin
 x_trigonometric=36'd0;
 x_3Dformula=54'd0;
 x_normalized=71'd0;
+if(valid_dp_DDM_i)begin
 if (cs==COMPUTE1 || cs==COMPUTE2)  begin 
 	if(cs==COMPUTE1) x_trigonometric = signed'(LUT_cosw[channel_ID_i])*sina1_i;
 	else if(cs==COMPUTE2) x_trigonometric = signed'(LUT_cosw[channel_ID_i])*sina2_i;
 	x_3Dformula  = x_trigonometric * distance;
 	x_normalized = (x_3Dformula * NORMALIZER_XY)>>>48;
+end
 end
 end //end comb
 
@@ -121,6 +160,7 @@ always_comb begin
 y_trigonometric=36'd0;
 y_3Dformula=54'd0;
 y_normalized=71'd0;
+if (valid_dp_DDM_i) begin
 if (cs==COMPUTE1 || cs==COMPUTE2  ) begin
 	if(cs==COMPUTE1) y_trigonometric = signed'(LUT_cosw[channel_ID_i])*cosa1_i;
 	else if(cs==COMPUTE2) y_trigonometric = signed'(LUT_cosw[channel_ID_i])*cosa2_i;
@@ -128,6 +168,7 @@ if (cs==COMPUTE1 || cs==COMPUTE2  ) begin
 	y_normalized = (y_3Dformula * NORMALIZER_XY)>>>48;
 	end
 end //end comb
+end
 
 logic signed [50:0] z_normalized_no_offset;
 
@@ -137,7 +178,7 @@ z_3Dformula=34'd0;
 z_corrected=35'd0;
 z_normalized_no_offset=51'd0;
 z_normalized=52'd0;
-
+if(valid_dp_DDM_i) begin
 if (cs==COMPUTE1 || cs==COMPUTE2) begin
 z_3Dformula  = signed'(LUT_sinw[channel_ID_i]) * distance;
 z_corrected= signed'(LUT_Z[channel_ID_i])+z_3Dformula;
@@ -145,7 +186,7 @@ z_normalized_no_offset=(z_3Dformula*NORMALIZER_Z)>>>32;
 z_normalized = (z_corrected * NORMALIZER_Z)>>>32;
 end // end if
 end //end comb
-
+end
 
 always_ff@(posedge clk_i, negedge rstn_i) begin
 if(~rstn_i) begin
