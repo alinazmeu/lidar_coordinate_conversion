@@ -1,0 +1,73 @@
+module Lidar_ACM (
+input logic clk_i, 
+input logic rstn_i,
+input [7:0] data_i
+input logic valid_data_i,
+output logic [15:0] azimuth_o,
+output logic valid_azimuth_o,
+
+//signals of fifo input
+);
+
+//internal logic
+localparam logic [15:0] 0xFFEE;
+logic [15:0] flag_control_d, flag_control_q; //??va bene che sia un registro???
+
+//flags for data routing
+logic flag_ok;
+
+typedef enum logic [2:0] {STATE_IDLE, STATE_HEADER, STATE_FLAG, STATE_AZIMUTH, STATE_DISTANCE} statetype;
+statetype cs, ns;
+
+//FSM
+always_comb begin
+  ns=cs;
+  case(cs)
+    STATE_IDLE: begin
+      if(valid_data_i) begin
+        ns=STATE_HEADER;
+      end
+    end
+    STATE_HEADER: begin
+      if(valid_d_i && cnt_data_q==6'd41)
+        ns=STATE_FLAG
+    end
+    STATE_FLAG: begin
+     if(valid_d_i && cnt_data_q==6'b0) 
+      
+    end
+
+end
+
+always_ff @(posedge clk_i, negedge rstn_i) begin
+  if(~rstn_i) 
+    cs<=IDLE;
+  else 
+    cs<=ns;
+end
+
+//COUNTER TO COUNT THE FIRST 42 BYTE OF HEADER
+logic [5:0] cnt_data_d, cnt_data_q;
+
+always_comb begin
+  cnt_data_d=cnt_data_q;
+  if(valid_data_i && cnt_data_q==6'd41) //??controllo sul cs??
+    cnt_data_d=6'b0; //ho finito di contare il header e resetto il contatore per riutilizzarlo
+  else if(valid_data_i) 
+    cnt_data_d=cnt_data_q+6'b1;
+end
+
+
+always_ff@(posedge clk_i, negedge rstn_i) begin
+  if(~rstn_i) begin
+      cnt_data_q<=6'b0;
+      flag_control_q<=16'b0;
+  end
+  else begin
+    cnt_data_q<=cnt_data_d;
+    flag_control_q<=flag_control_d;
+  end
+end 
+
+
+end module
