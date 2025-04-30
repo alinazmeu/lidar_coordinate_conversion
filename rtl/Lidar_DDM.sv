@@ -21,7 +21,7 @@ module Lidar_DDM
     output logic valid_datapoint_DDM_o, //function of fifo_(distance, id) not empty signal
 
     //fifo signals
-    logic testmode_i 
+    input logic testmode_i 
     
   );
 
