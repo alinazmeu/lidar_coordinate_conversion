@@ -5,7 +5,7 @@ module Lidar_DDM
 
     //handshake with CCM e ACM
     input logic ready_CCM_i, //to be conncet to pop_i pin of fifo_distance and fifo_id
-    input logic ready_fs1_ACM_i, //to be connect to azimuth forward block
+    input logic ready_ACM_i, //to be connect to azimuth forward block
     
   //data from ethernet phy to be pushed into fifo_in
     input logic [7:0] data_i, //to be connect to data_i pin of fifo_in
@@ -16,7 +16,7 @@ module Lidar_DDM
     output logic valid_azimuth_DDM_o, //to notify ACM that a new azimuth from packet has been decoded 
 
     //2B distance from fifo_distance and 4 bit id from fifo_id to be popped by CCM
-	  output logic [15:0] distance_o, 
+    output logic [15:0] distance_o, 
     output logic [3:0] id_o,
     output logic valid_datapoint_DDM_o, //function of fifo_(distance, id) not empty signal
 
@@ -72,7 +72,7 @@ assign valid_datapoint_DDM_o=valid_datapoint;
   logic [4:0]  usage_fifo_distance;
 
   fifo #(
-	  .DATA_WIDTH(16),
+    .DATA_WIDTH(16),
     .DEPTH(16)
   )
   fifo_distance(
@@ -121,9 +121,11 @@ statetype cs, ns;
     flush_fifo_in=1'd0;
     flush_fifo_distance=1'd0;
     flush_fifo_id=1'd0;
-    
-    if(full_fifo_distance || full_fifo_id) ready_decoder=1'b0; 
-    
+   
+    if(cs==STATE_IDLE) ready_decoder=1'b0;
+    else if(full_fifo_distance || full_fifo_id && (cs==STATE_FIRING1 || cs==STATE_FIRING2) ) ready_decoder=1'b0; 
+    else if (cs==STATE_AZIMUTH && ~ready_ACM_i) ready_decoder=1'b0;
+
   end
   
 //FSM
@@ -136,7 +138,7 @@ always_comb begin
       end
     end
     STATE_FLAG: begin
-      if (~empty_fifo_in && cnt_data_q==6'd1)
+      if (cnt_data_q==6'd1)
         ns=STATE_AZIMUTH;
     end
     STATE_AZIMUTH: begin
@@ -193,12 +195,12 @@ end
     if(cs==STATE_FIRING1 || cs==STATE_FIRING2) begin
       if (~empty_fifo_in && cnt_data_q==6'd0)
         distance_msbyte_n=data_decoder;
-      else if(~empty_fifo_in && cnt_data_q==6'd1) begin
-        cnt_id_n=cnt_id_q+4'd1;
+      else if(~empty_fifo_in && cnt_data_q==6'd1)
         distance_lsbyte_n=data_decoder;
-      end
-      else if(~empty_fifo_in && cnt_data_q==6'd2)
+      else if(~empty_fifo_in && cnt_data_q==6'd2) begin
         valid_datapoint=1'b1; 
+	   cnt_id_n=cnt_id_q+4'd1;
+	end
     end
   end
 
@@ -211,7 +213,7 @@ always_comb begin
   else if (valid_datapoint) begin //TO COUNTS 2 BYTES OF DISTANCE AND 1 BYTE OF REFLECTIVITY FOR EACH CHANNEL IN DATA BLOCK
     cnt_data_n=6'd0;
   end
-    else if(~empty_fifo_in) 
+    else if(~empty_fifo_in && cs!=STATE_IDLE) 
       cnt_data_n=cnt_data_q+6'd1;
 end
 
