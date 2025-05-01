@@ -49,7 +49,7 @@ assign valid_datapoint_DDM_o=valid_datapoint;
   logic flush_fifo_in, full_fifo_in, empty_fifo_in;
   logic [4:0]  usage_fifo_in; 
   
-  fifo #(
+  fifo_v3 #(
     .DATA_WIDTH(8),
     .DEPTH(16)
   )
@@ -71,7 +71,7 @@ assign valid_datapoint_DDM_o=valid_datapoint;
   logic flush_fifo_distance, full_fifo_distance, empty_fifo_distance;
   logic [4:0]  usage_fifo_distance;
 
-  fifo #(
+  fifo_v3 #(
     .DATA_WIDTH(16),
     .DEPTH(16)
   )
@@ -93,7 +93,7 @@ assign valid_datapoint_DDM_o=valid_datapoint;
   logic flush_fifo_id, full_fifo_id, empty_fifo_id;
   logic [4:0]  usage_fifo_id;
   
-  fifo #(
+  fifo_v3 #(
     .DATA_WIDTH(4),
     .DEPTH(16)
   )
