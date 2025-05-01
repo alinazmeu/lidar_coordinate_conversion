@@ -2,6 +2,9 @@ package:
   name: lidar_coordinate_conversion
   authors: ["Alina Zmeu <alina.zmeu@studio.unibo.it>"]
 
+dependencies:
+  common_cells: {git: "https://github.com/pulp-platform/common_cells.git", version: "1.38.0" }
+
 sources:
   - target: any(rtl,synthesis,test)
     files:
