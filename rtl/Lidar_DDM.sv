@@ -16,7 +16,7 @@ module Lidar_DDM
     output logic valid_azimuth_DDM_o, //to notify ACM that a new azimuth from packet has been decoded 
 
     //2B distance from fifo_distance and 4 bit id from fifo_id to be popped by CCM
-    output logic [7:0] distance_o, 
+	  output logic [15:0] distance_o, 
     output logic [3:0] id_o,
     output logic valid_datapoint_DDM_o, //function of fifo_(distance, id) not empty signal
 
@@ -72,7 +72,7 @@ assign valid_datapoint_DDM_o=valid_datapoint;
   logic [4:0]  usage_fifo_distance;
 
   fifo #(
-    .DATA_WIDTH(8),
+	  .DATA_WIDTH(16),
     .DEPTH(16)
   )
   fifo_distance(
