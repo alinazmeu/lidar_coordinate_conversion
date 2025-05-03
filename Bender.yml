@@ -10,6 +10,7 @@ sources:
       - rtl/Lidar_CCM.sv
       - rtl/Lidar_top_level.sv
       - rtl/Lidar_DDM.sv
+      -rtl/fifo_v3
   - target: all(test, not(synthesis))
     files:
       - tb/load_stim_pkg.sv
