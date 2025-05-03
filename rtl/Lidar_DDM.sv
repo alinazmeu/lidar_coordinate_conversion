@@ -47,7 +47,7 @@ assign fifo_dist_pop = ready_CCM_i && !fifo_dist_empty;
 assign fifo_id_pop = ready_CCM_i && !fifo_id_empty;
 
 //FIFO_IN instance 
-  fifo #(
+  fifo_v3#(
     .DATA_WIDTH(8),
     .DEPTH(16),
     .FALL_THROUGH(0)
@@ -68,7 +68,7 @@ assign fifo_id_pop = ready_CCM_i && !fifo_id_empty;
 
 //FIFO_DISTANCE instance of fifo_v3 common cell
 
-  fifo #(
+  fifo_v3 #(
     .DATA_WIDTH(16),
     .DEPTH(16),
     .FALL_THROUGH(0)
@@ -89,7 +89,7 @@ assign fifo_id_pop = ready_CCM_i && !fifo_id_empty;
 
 //FIFO_ID instance
   
-  fifo #(
+  fifo_v3 #(
     .DATA_WIDTH(4),
     .DEPTH(16),
     .FALL_THROUGH(0
