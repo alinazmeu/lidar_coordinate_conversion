@@ -3,10 +3,10 @@ module Lidar_DDM
     input logic clk_i, 
     input logic rstn_i,
 
-    //handshake with CCM e ACM
-    input logic ready_CCM_i, //to be conncet to pop_i pin of fifo_distance and fifo_id
-    input logic ready_ACM_i, //to be connect to azimuth forward block
-    
+    ///backpressure and handshake
+    input logic ready_CCM_i, 
+    input logic ready_ACM_i, 
+
   //data from ethernet phy to be pushed into fifo_in
     input logic [7:0] data_i, //to be connect to data_i pin of fifo_in
     input logic valid_data_i, //to be connect to push_i pin of fifo_in
@@ -16,8 +16,8 @@ module Lidar_DDM
     output logic valid_azimuth_DDM_o, //to notify ACM that a new azimuth from packet has been decoded 
 
     //2B distance from fifo_distance and 4 bit id from fifo_id to be popped by CCM
-    output logic [15:0] distance_o, 
-    output logic [3:0] id_o,
+    output logic [15:0] distance_DDM_o, 
+    output logic [3:0] id_DDM_o,
     output logic valid_datapoint_DDM_o, //function of fifo_(distance, id) not empty signal
 
     //fifo signals
@@ -25,244 +25,224 @@ module Lidar_DDM
     
   );
 
+//FIFO_IN control and data signals
+  logic fifo_in_pop, fifo_in_flush, fifo_in_full, fifo_in_empty; //fifo_in_push is connect top valid_data_i input signal
+  logic [3:0] fifo_in_usage; 
+  logic [7:0] data_parser; //output 8 byte of fifo_in
 
-  logic [5:0] cnt_data_n, cnt_data_q; //to count 2B flag, 2B azimuth, 32*(2B distance+1B reflectivity) data points
-  logic [3:0] cnt_id_n, cnt_id_q; //to count 16 data points in firing and to generate an id for each data point in firing 
-  logic [3:0] cnt_block_n, cnt_block_q; // to count 12 data block in a packet
-
-  localparam logic [7:0] FLAG_MSBYTE=8'hFF, FLAG_LSBYTE=8'hEE;
-
-  logic [7:0] data_decoder;
-  logic [7:0] azimuth_msbyte_n, azimuth_msbyte_q, flag_msbyte_n, flag_msbyte_q;
-  logic [7:0] distance_msbyte_n, distance_msbyte_q, distance_lsbyte_n, distance_lsbyte_q;
-
-  //flags for data routing
-logic flag_ok; //it does not drive any internal logic, it will be used in tb to check if flag value is the expected one 
-logic firing1_ok;
-logic firing2_ok;
-logic ready_decoder; //to pop data from fifo_in, by default is high. It might be pull down if fifo_distance or fifo_id are full
-logic valid_datapoint;
-
-assign valid_datapoint_DDM_o=valid_datapoint;
   
-  //FIFO_IN 
-  logic flush_fifo_in, full_fifo_in, empty_fifo_in;
-  logic [4:0]  usage_fifo_in; 
-  
-  fifo_v3 #(
+  //FIFO_DISTANCE 
+  logic fifo_dist_pop, fifo_dist_push, fifo_dist_flush, fifo_dist_full, fifo_dist_empty;
+  logic [3:0] fifo_dist_usage;
+  logic [15:0] distance_i; 
+
+  //FIFO_ID
+  logic fifo_id_pop, fifo_id_push, fifo_id_flush, fifo_id_full, fifo_id_empty;
+  logic [3:0] fifo_id_usage;
+  logic [3:0] id_i;
+
+
+// Output handshakes
+assign fifo_dist_pop = ready_CCM_i && !fifo_dist_empty; 
+assign fifo_id_pop = ready_CCM_i && !fifo_id_empty;
+
+//FIFO_IN instance 
+  fifo #(
     .DATA_WIDTH(8),
-    .DEPTH(16)
+    .DEPTH(16),
+    .FALL_THROUGH(0)
   )
   fifo_in(
     .clk_i(clk_i),
     .rst_ni(rstn_i),
-    .flush_i(flush_fifo_in),
+    .flush_i(fifo_in_flush),
     .testmode_i(testmode_i),
     .data_i(data_i),
-    .push_i(valid_data_i),
-    .pop_i(ready_decoder),
-    .full_o(full_fifo_in),
-    .empty_o(empty_fifo_in),
-    .usage_o(usage_fifo_in),
-    .data_o(data_decoder)
+    .push_i(valid_data_i), //if fifo is full and valid_data_i=1 this should cause a data drop => the depth  might be big enough to avoid this case
+    .pop_i(fifo_in_pop), // there might be a backpressure from both ACM and CCM 
+    .full_o(fifo_in_full),
+    .empty_o(fifo_in_empty),
+    .usage_o(fifo_in_usage),
+    .data_o(data_parser)
   );
 
-  //FIFO_DISTANCE
-  logic flush_fifo_distance, full_fifo_distance, empty_fifo_distance;
-  logic [4:0]  usage_fifo_distance;
+//FIFO_DISTANCE instance of fifo_v3 common cell
 
-  fifo_v3 #(
+  fifo #(
     .DATA_WIDTH(16),
-    .DEPTH(16)
+    .DEPTH(16),
+    .FALL_THROUGH(0)
   )
   fifo_distance(
     .clk_i(clk_i),
     .rst_ni(rstn_i),
-    .flush_i(flush_fifo_distance), //controlled by internal logic, zero default
+    .flush_i(fifo_dist_flush), 
     .testmode_i(testmode_i),
-    .data_i({distance_msbyte_q, distance_lsbyte_q}),
-    .push_i(valid_datapoint),
-    .pop_i(ready_CCM_i), 
-    .full_o(full_fifo_distance),
-    .empty_o(empty_fifo_distance),
-    .usage_o(usage_fifo_distance),
-    .data_o(distance_o)
+    .data_i(distance_i),
+    .push_i(fifo_dist_push), //the push might be stopped if if full_fifo_distance=0
+    .pop_i(fifo_dist_pop), 
+    .full_o(fifo_dist_full),
+    .empty_o(fifo_dist_empty),
+    .usage_o(fifo_dist_usage),
+    .data_o(distance_DDM_o)
   );
 
-  //FIFO_ID
-  logic flush_fifo_id, full_fifo_id, empty_fifo_id;
-  logic [4:0]  usage_fifo_id;
+//FIFO_ID instance
   
-  fifo_v3 #(
+  fifo #(
     .DATA_WIDTH(4),
-    .DEPTH(16)
+    .DEPTH(16),
+    .FALL_THROUGH(0
+)
   )
   fifo_id(
     .clk_i(clk_i),
     .rst_ni(rstn_i),
-    .flush_i(flush_fifo_id),
+    .flush_i(fifo_id_flush),
     .testmode_i(testmode_i),
-    .data_i(cnt_id_q),
-    .push_i(valid_datapoint),
-    .pop_i(ready_CCM_i), 
-    .full_o(full_fifo_id),
-    .empty_o(empty_fifo_id),
-    .usage_o(usage_fifo_id),
-    .data_o(id_o)
+    .data_i(id_i),
+    .push_i(fifo_id_push),
+    .pop_i(fifo_id_pop), 
+    .full_o(fifo_id_full),
+    .empty_o(fifo_id_empty),
+    .usage_o(fifo_id_usage),
+    .data_o(id_DDM_o)
   );
 
 
-  typedef enum logic [2:0] {STATE_IDLE, STATE_FLAG, STATE_AZIMUTH, STATE_FIRING1, STATE_FIRING2} statetype;
-statetype cs, ns;
+typedef enum logic [2:0] {
+    IDLE,
+    GET_FLAG1,     // First byte of header (0xFF)
+    GET_FLAG2,     // Second byte of header (0xEE)
+    GET_ANGLE1,   // First byte of angle
+    GET_ANGLE2,   // Second byte of angle
+    DIST_HI,      // High byte of distance
+    DIST_LO,      // Low byte of distance
+    SKIP_JUNK     // Skip junk byte
+} state_t;
 
-  always_comb begin
-    ready_decoder=1'b1; 
+state_t state, next_state;
+logic [7:0] byte_buf_n, byte_buf_q;         // Temporary buffer for data
+logic [5:0] dist_count_n, dist_count_q;   // Counts up to 32 for distance data
+logic [3:0] id_count_n, id_count_q;
 
-    flush_fifo_in=1'd0;
-    flush_fifo_distance=1'd0;
-    flush_fifo_id=1'd0;
-   
-    if(cs==STATE_IDLE) ready_decoder=1'b0;
-    else if(full_fifo_distance || full_fifo_id && (cs==STATE_FIRING1 || cs==STATE_FIRING2) ) ready_decoder=1'b0; 
-    else if (cs==STATE_AZIMUTH && ~ready_ACM_i) ready_decoder=1'b0;
-
-  end
-  
-//FSM
-always_comb begin
-  ns=cs;
-  case(cs)
-    STATE_IDLE: begin
-      if(~empty_fifo_in) begin
-        ns=STATE_FLAG;
-      end
-    end
-    STATE_FLAG: begin
-      if (cnt_data_q==6'd1)
-        ns=STATE_AZIMUTH;
-    end
-    STATE_AZIMUTH: begin
-      if(valid_azimuth_DDM_o)
-        ns=STATE_FIRING1;
-    end
-    STATE_FIRING1: begin
-      if(firing1_ok) 
-        ns=STATE_FIRING2;
-    end
-  STATE_FIRING2: begin
-    if(firing2_ok && cnt_block_q<=4'd11) 
-      ns=STATE_FLAG;
-    else if(firing2_ok && cnt_block_q==4'd11)
-      ns=STATE_IDLE;
-  end
-endcase
-end
-
-    //FLAG VERIFICATION  (EACH DATA BLOCK STARTS WITH 0xFFEE FLAG)
-always_comb begin 
-  flag_msbyte_n=flag_msbyte_q;
-  flag_ok=1'b0;
-    if(cs==STATE_FLAG) begin
-      if(~empty_fifo_in && cnt_data_q==6'd0)
-        flag_msbyte_n = data_decoder;
-      else if(~empty_fifo_in && cnt_data_q==6'd1) begin
-        if (flag_msbyte_q==FLAG_MSBYTE && data_decoder==FLAG_LSBYTE) 
-          flag_ok=1'b1;
-      end
-  end
-end
-
-//AZIMUTH 2 BYTES DATA to ACM
-always_comb begin
-  azimuth_msbyte_n=azimuth_msbyte_q;
-  valid_azimuth_DDM_o=1'b0;
-  if(cs==STATE_AZIMUTH) begin
-    if(~empty_fifo_in && cnt_data_q==6'd2) 
-      azimuth_msbyte_n=data_decoder;
-    else if (~empty_fifo_in && cnt_data_q==6'd3 ) begin
-      azimuth_DDM_o = {azimuth_msbyte_q, data_decoder};
-      valid_azimuth_DDM_o=1'b1;
-    end
-  end
-end
-
-  //DISTANCE 2B to fifo_distance and ID 4 bit to fifo_id
-  always_comb begin
-    cnt_id_n=cnt_id_q;
-    distance_msbyte_n=distance_msbyte_q;
-    distance_lsbyte_n=distance_lsbyte_q;
-    valid_datapoint=1'b0;
-    if(cs==STATE_FIRING1 || cs==STATE_FIRING2) begin
-      if (~empty_fifo_in && cnt_data_q==6'd0)
-        distance_msbyte_n=data_decoder;
-      else if(~empty_fifo_in && cnt_data_q==6'd1)
-        distance_lsbyte_n=data_decoder;
-      else if(~empty_fifo_in && cnt_data_q==6'd2) begin
-        valid_datapoint=1'b1; 
-	   cnt_id_n=cnt_id_q+4'd1;
-	end
-    end
-  end
+logic valid_flag;
 
 
-    //COUNTER TO COUNT THE INPUT VALID BYTES {header 42 B, flag 2B + azimuth 2B, 32*[distance 2 B + reflectivity 1B]}
-always_comb begin
-  cnt_data_n=cnt_data_q;
-  if(valid_azimuth_DDM_o)
-      cnt_data_n=6'd0;
-  else if (valid_datapoint) begin //TO COUNTS 2 BYTES OF DISTANCE AND 1 BYTE OF REFLECTIVITY FOR EACH CHANNEL IN DATA BLOCK
-    cnt_data_n=6'd0;
-  end
-    else if(~empty_fifo_in && cs!=STATE_IDLE) 
-      cnt_data_n=cnt_data_q+6'd1;
-end
-
-  always_comb begin
-    firing1_ok=1'b0;
-    firing2_ok=1'b0;
-    cnt_block_n=cnt_block_q;
-    if(cs==STATE_FIRING1 && ~empty_fifo_in && cnt_id_q==4'd15) 
-     firing1_ok=1'b1; 
-    else if(cs==STATE_FIRING2 && ~empty_fifo_in && cnt_id_q==4'd15) begin
-      firing2_ok=1'b1;
-      cnt_block_n=cnt_block_q+4'd1;
-    end
-  end
-    
-
+// Sequential Logic (Registers)
 always_ff @(posedge clk_i, negedge rstn_i) begin
-  if(~rstn_i) 
-    cs<=STATE_IDLE;
-  else 
-    cs<=ns;
+    if (!rstn_i) begin
+        state <= IDLE;
+        byte_buf_q <= 8'd0;
+        dist_count_q <= 6'd0;
+	id_count_q<=4'd0;
+    end else begin
+        state <= next_state;
+        byte_buf_q<=byte_buf_n;
+	dist_count_q<=dist_count_n;
+	id_count_q<=id_count_n;
+        end
 end
-    
-always_ff@(posedge clk_i, negedge rstn_i) begin
-  if(~rstn_i) begin
-      cnt_data_q<=6'b0;
-      cnt_id_q<=4'b0;
-      cnt_block_q<=4'd0;
-  end
-  else begin
-    cnt_data_q<=cnt_data_n;
-    cnt_id_q<=cnt_id_n;
-    cnt_block_q<=cnt_block_n;
-  end
-end 
 
-always_ff@(posedge clk_i, negedge rstn_i) begin
-if(~rstn_i) begin
-    azimuth_msbyte_q<=8'd0;
-    flag_msbyte_q<=8'd0;
-    distance_msbyte_q<=8'd0;
-    distance_lsbyte_q<=8'd0;
-	end
-else begin
-  azimuth_msbyte_q<=azimuth_msbyte_n;
-    flag_msbyte_q<=flag_msbyte_n;
-    distance_msbyte_q<=distance_msbyte_n;
-    distance_lsbyte_q<=distance_lsbyte_n;
-	end
+// Combinational Logic (State Transitions and Output Logic)
+always_comb begin
+    // Default values
+    fifo_in_pop = 1'b0;
+    fifo_dist_push = 1'b0;
+    fifo_id_push=1'b0;
+    valid_azimuth_DDM_o = 1'b0;
+    valid_flag=1'b0;
+    valid_datapoint_DDM_o=1'b0;
+
+   distance_i = 16'd0;
+   id_i=4'd0;
+   id_DDM_o=4'd0;
+   distance_DDM_o=4'd0;
+   azimuth_DDM_o=16'd0;
+
+    
+    next_state = state;
+	byte_buf_n=byte_buf_q;
+	dist_count_n=dist_count_q;
+	id_count_n=id_count_q;
+
+    case (state)
+        IDLE: begin
+            if (valid_data_i) begin //when i receive the first valid data from phy i can go out from idle
+                next_state = GET_FLAG1;
+            end
+        end
+
+        GET_FLAG1: begin
+            if (!fifo_in_empty) begin
+                fifo_in_pop = 1;  // Pop the first byte
+		byte_buf_n=data_parser;
+                next_state = GET_FLAG2;
+            end
+        end
+
+        GET_FLAG2: begin
+            if (!fifo_in_empty) begin
+		  fifo_in_pop = 1;
+		   next_state = GET_ANGLE1;
+                if (byte_buf_q == 8'hFF && data_parser == 8'hEE) 
+			valid_flag=1'b1;
+            end
+        end
+
+        GET_ANGLE1: begin
+            if (!fifo_in_empty) begin
+                fifo_in_pop = 1;
+		byte_buf_n=data_parser;
+                next_state = GET_ANGLE2;
+            end
+        end
+
+        GET_ANGLE2: begin
+            if (ready_ACM_i && !fifo_in_empty) begin
+		fifo_in_pop = 1;
+                // When ACM is ready, push the composed angle
+                azimuth_DDM_o = {byte_buf_q, data_parser};
+                valid_azimuth_DDM_o= 1;
+                next_state = DIST_HI;
+                dist_count_n = 0; // Reset distance count
+		id_count_n=0;
+            end
+        end
+
+        DIST_HI: begin
+            if (!fifo_in_empty) begin
+                fifo_in_pop = 1;  // Pop the high byte of distance
+		byte_buf_n=data_parser;
+                next_state = DIST_LO;
+            end
+        end
+
+        DIST_LO: begin
+            if (!fifo_in_empty && (!fifo_dist_full && !fifo_id_full)) begin
+                fifo_in_pop = 1'b1;  // Pop the low byte of distance
+                distance_i= {byte_buf_q, data_parser};  // Compose 16-bit distance
+		id_i=id_count_q;
+                fifo_dist_push = 1'b1;  // Push to FIFO B
+		fifo_id_push=1'b1;
+                next_state = SKIP_JUNK;
+            end
+        end
+
+        SKIP_JUNK: begin
+            if (!fifo_in_empty ) begin
+                fifo_in_pop = 1;  // Discard junk byte
+                if (dist_count_q == 31) begin
+                    next_state = IDLE;  // All distances processed, go back to IDLE
+                end else begin
+                    dist_count_n = dist_count_q+ 1;
+		    id_count_n =id_count_q+1;
+                    next_state = DIST_HI;
+                end
+            end
+        end
+    endcase
 end
+
 
 endmodule
