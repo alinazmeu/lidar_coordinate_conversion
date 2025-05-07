@@ -8,65 +8,45 @@ import write_out_pkg::*;
 
 logic clk_i;
 logic rstn_i;
-logic [3:0] channel_ID_i;
-logic [15:0] distance_i;
-logic [15:0]azimuth_i;
-logic valid_dp_DDM_i;
-logic valid_DDM_i;
-logic valid_fs1_CCM_o;
-logic valid_fs2_CCM_o;
-logic valid_fs1_ACM_o;
-logic valid_fs2_ACM_o;
-logic valid_dp_CCM_o;
+logic testmode_i;
+logic valid_data_i;
+logic [7:0] data_i;
+logic valid_datapoint_CCM_o;
+logic ready_DDM_o;
 logic signed [17:0] x_o, y_o, z_o;
+logic [7:0] nr_packets;
 
 Lidar_top_level DUT(
 	.rstn_i(rstn_i),
 	.clk_i (clk_i),
-	.channel_ID_i(channel_ID_i),
-	.distance_i(distance_i),
-	.azimuth_i(azimuth_i),
-	.valid_DDM_i(valid_DDM_i),
-	.valid_dp_DDM_i(valid_dp_DDM_i),
-	.valid_fs1_CCM_o(valid_fs1_CCM_o),
-	.valid_fs2_CCM_o(valid_fs2_CCM_o),
-	.valid_fs1_ACM_o(valid_fs1_ACM_o),
-	.valid_fs2_ACM_o(valid_fs2_ACM_o),
-	.valid_dp_CCM_o(valid_dp_CCM_o),
+	.data_i(data_i),
+	.valid_data_i(valid_data_i),
+	.valid_datapoint_CCM_o(valid_datapoint_CCM_o),
 	.x_o(x_o),
 	.y_o(y_o),
-	.z_o(z_o)
-	
+	.z_o(z_o),
+	.ready_DDM_o(ready_DDM_o),
+	.testmode_i(testmode_i),
+	.nr_packets(nr_packets)
 );
 
 int length_sim;
-
-int id=0;
-int array_idx = 0;
-int idx=0;
-
-logic cs_compute;
-initial begin
-	if(valid_fs1_ACM_o)
-	@(posedge clk_i);
-	cs_compute=1;
-end
-
+int index=0;
+int out_idx = 0;
 
 // Declare stimuli vectors
-logic [15:0] azimuth[$];
-logic [15:0] distance[$];
+logic [7:0] bytes[$];
+
+assign length_sim = $bits(bytes)/8;
 
 // Declare output vectors
 logic signed [17:0] x[$], y[$], z[$];
 
+
 // Load stimuli from .txt files
 initial begin
-	load_azimuth("../tb/stimuli/azimuth.txt", azimuth);
-	load_distance("../tb/stimuli/distance.txt", distance);
+	load_bytes("../tb/stimuli/frame.txt", bytes);
 end
-
-assign length_sim = $bits(distance)/16; //$bits(variable) returns the total number of bits in a variable, not its size or element count, assign requires constant sized variables
 
 initial begin
 	clk_i='0;
@@ -80,99 +60,36 @@ initial begin
 	rstn_i='0;
 	#5;
 	rstn_i=1'b1;
-	
 end
 
-// Display facilities
-/*initial begin
-	while(idx<length_sim) begin
-		wait(valid_fs1_ACM_o) 
-		repeat(3) @(posedge clk_i);
-		$display("azimuth%d", azimuth_i);
-		for(int i=0; i<=15; i++) begin
-			$display("ID:%d, Distance:%d, x:%d, y:%d, z:%d",i, distance[idx], x_o,y_o,z_o);
-			@(posedge clk_i);
-			idx++;
-		end
-
-		wait(valid_fs2_ACM_o)
-		repeat(3) @(posedge clk_i);
-		for(int i=0; i<=15; i++) begin
-			$display("ID:%d, Distance:%d, x:%d, y:%d, z=%d",i, distance[idx], x_o,y_o,z_o);
-			@(posedge clk_i);
-			idx++;
-		end
-	end
-end*/
-
-
 initial begin
+testmode_i=1'b1;
+valid_data_i=1'b0;
+wait(rstn_i)
 
-	wait(rstn_i)
-	@(posedge clk_i); 
-	valid_DDM_i=1'd1; //ACM goes to COMPUTE1
-	azimuth_i = azimuth[array_idx];
-	@(posedge clk_i); //ACM in COMPUTE1
-	valid_DDM_i='0;
+while(index<=length_sim) begin
+@(posedge clk_i);
+valid_data_i=1'b1;
+data_i=bytes[index];
 
-	while(array_idx<length_sim) begin //loop per un data_packet
-
-		wait(valid_fs1_ACM_o) //ACM in RESULT1, CCM goes to COMPUTE1
-		@(posedge clk_i); //CCM in COMPUTE1 
-		valid_dp_DDM_i=1'd1;
-		while(id<=15) begin
-			channel_ID_i=id;
-			distance_i=distance[array_idx];
-			id++;
-			array_idx++;
-			@(posedge clk_i); 
-		end
-		id=0; 
-		@(posedge clk_i); 
-		wait(valid_fs2_ACM_o)
-
-		@(posedge clk_i); // CCM goes to COMPUTE2
-		while(id<=15) begin
-			wait(cs_compute)
-			channel_ID_i=id;
-			distance_i=distance[array_idx];
-			@(posedge clk_i);
-			id++;
-			array_idx++; 
-		end
-		id=0;
-		valid_dp_DDM_i='0;
-		@(posedge clk_i); //finished data point
-		@(posedge clk_i); //ACM e CCM in IDLE, ACM goes to COMPUTE1
-		if(array_idx < length_sim) begin
-			valid_DDM_i=1'd1;
-			azimuth_i = azimuth[array_idx];
-		end
-
-		@(posedge clk_i); //ACM in COMPUTE1
-		valid_DDM_i='0;
-	end
-	$stop;
+if(valid_datapoint_CCM_o) begin
+	x[out_idx] = x_o;
+	y[out_idx] = y_o;
+	z[out_idx] = z_o;
+	
+	out_idx++;
+end
+index++;
 end
 
-// Output acquisition and export
-initial begin
-	int out_idx = 0;
-	
-	while (out_idx < length_sim) begin
-		@(posedge clk_i);
-		if(valid_dp_CCM_o) begin
-			x[out_idx] = x_o;
-			y[out_idx] = y_o;
-			z[out_idx] = z_o;
+write_x_out(x, "x_out.txt");
+write_y_out(y, "y_out.txt");
+write_z_out(z, "z_out.txt");
+$display("Number of packets: %d", nr_packets);
 
-			out_idx++;
-		end
-	end
+repeat(5) @(posedge clk_i);
 
-	write_x_out(x, "x_out.txt");
-	write_y_out(y, "y_out.txt");
-	write_z_out(z, "z_out.txt");
+$stop;
 end
 
 endmodule
