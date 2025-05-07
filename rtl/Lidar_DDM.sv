@@ -4,8 +4,12 @@ module Lidar_DDM
     input logic rstn_i,
 
     ///backpressure and handshake
-    input logic ready_CCM_i, 
+    input logic ready_CCM_i,  
     input logic ready_ACM_i, 
+
+    //fifo signals
+    input logic testmode_i, 
+  
 
   //data from ethernet phy to be pushed into fifo_in
     input logic [7:0] data_i, //to be connect to data_i pin of fifo_in
@@ -18,38 +22,50 @@ module Lidar_DDM
     //2B distance from fifo_distance and 4 bit id from fifo_id to be popped by CCM
     output logic [15:0] distance_DDM_o, 
     output logic [3:0] id_DDM_o,
-    output logic valid_datapoint_DDM_o, //function of fifo_(distance, id) not empty signal
+    output logic valid_channel_DDM_o, //function of fifo_(distance, id) not empty signal
 
-    //fifo signals
-    input logic testmode_i 
+    output logic ready_DDM_o,
+
+    //for debugging
+    output logic [7:0] nr_packets
     
   );
 
 //FIFO_IN control and data signals
   logic fifo_in_pop, fifo_in_flush, fifo_in_full, fifo_in_empty; //fifo_in_push is connect top valid_data_i input signal
-  logic [3:0] fifo_in_usage; 
-  logic [7:0] data_parser; //output 8 byte of fifo_in
+
+  localparam int unsigned FIFO_IN_DEPTH = 32;
+  localparam int unsigned FIFO_IN_DATA_WIDTH = 8;
+  localparam int unsigned FIFO_IN_USAGE_WIDTH = $clog2(FIFO_IN_DEPTH);
+
+  logic [FIFO_IN_USAGE_WIDTH-1:0] fifo_in_usage;
+  logic [FIFO_IN_DATA_WIDTH-1:0] data_parser; //output 8 byte of fifo_in
 
   
   //FIFO_DISTANCE 
   logic fifo_dist_pop, fifo_dist_push, fifo_dist_flush, fifo_dist_full, fifo_dist_empty;
-  logic [3:0] fifo_dist_usage;
-  logic [15:0] distance_i; 
+
+  localparam int unsigned FIFO_DISTANCE_DEPTH = 16;
+  localparam int unsigned FIFO_DISTANCE_DATA_WIDTH = 16;
+  localparam int unsigned FIFO_DISTANCE_USAGE_WIDTH = $clog2(FIFO_DISTANCE_DEPTH);
+
+  logic [FIFO_DISTANCE_USAGE_WIDTH-1:0] fifo_dist_usage;
+  logic [FIFO_DISTANCE_DATA_WIDTH-1:0] distance_i; 
 
   //FIFO_ID
   logic fifo_id_pop, fifo_id_push, fifo_id_flush, fifo_id_full, fifo_id_empty;
-  logic [3:0] fifo_id_usage;
-  logic [3:0] id_i;
 
+  localparam int unsigned FIFO_ID_DEPTH = 16;
+  localparam int unsigned FIFO_ID_DATA_WIDTH = 4;
+  localparam int unsigned FIFO_ID_USAGE_WIDTH = $clog2(FIFO_ID_DEPTH);
 
-// Output handshakes
-assign fifo_dist_pop = ready_CCM_i && !fifo_dist_empty; 
-assign fifo_id_pop = ready_CCM_i && !fifo_id_empty;
+  logic [FIFO_ID_USAGE_WIDTH-1:0] fifo_id_usage;
+  logic [FIFO_ID_DATA_WIDTH-1:0] id_i;
 
 //FIFO_IN instance 
   fifo_v3#(
-    .DATA_WIDTH(8),
-    .DEPTH(16),
+    .DATA_WIDTH(FIFO_IN_DATA_WIDTH),
+    .DEPTH(FIFO_IN_DEPTH),
     .FALL_THROUGH(0)
   )
   fifo_in(
@@ -69,8 +85,8 @@ assign fifo_id_pop = ready_CCM_i && !fifo_id_empty;
 //FIFO_DISTANCE instance of fifo_v3 common cell
 
   fifo_v3 #(
-    .DATA_WIDTH(16),
-    .DEPTH(16),
+    .DATA_WIDTH(FIFO_DISTANCE_DATA_WIDTH),
+    .DEPTH(FIFO_DISTANCE_DEPTH),
     .FALL_THROUGH(0)
   )
   fifo_distance(
@@ -90,10 +106,9 @@ assign fifo_id_pop = ready_CCM_i && !fifo_id_empty;
 //FIFO_ID instance
   
   fifo_v3 #(
-    .DATA_WIDTH(4),
-    .DEPTH(16),
-    .FALL_THROUGH(0
-)
+    .DATA_WIDTH(FIFO_ID_DATA_WIDTH),
+    .DEPTH(FIFO_ID_DEPTH),
+    .FALL_THROUGH(0)
   )
   fifo_id(
     .clk_i(clk_i),
@@ -110,6 +125,12 @@ assign fifo_id_pop = ready_CCM_i && !fifo_id_empty;
   );
 
 
+// handshakes
+assign fifo_dist_pop = ready_CCM_i && !fifo_dist_empty; 
+assign fifo_id_pop = ready_CCM_i && !fifo_id_empty;
+assign valid_channel_DDM_o = !fifo_dist_empty & !fifo_id_empty;
+assign ready_DDM_o=!fifo_in_full;
+
 typedef enum logic [2:0] {
     IDLE,
     GET_FLAG1,     // First byte of header (0xFF)
@@ -123,26 +144,32 @@ typedef enum logic [2:0] {
 
 state_t state, next_state;
 logic [7:0] byte_buf_n, byte_buf_q;         // Temporary buffer for data
-logic [5:0] dist_count_n, dist_count_q;   // Counts up to 32 for distance data
+logic [4:0] dist_count_n, dist_count_q;   // Counts up to 32 for distance data
 logic [3:0] id_count_n, id_count_q;
-
-logic valid_flag;
-
+logic [3:0] block_count_n, block_count_q; //counts up to 12 blocks
+logic [7:0] packet_count_n, packet_count_q;
+logic valid_flag; 
 
 // Sequential Logic (Registers)
 always_ff @(posedge clk_i, negedge rstn_i) begin
     if (!rstn_i) begin
         state <= IDLE;
         byte_buf_q <= 8'd0;
-        dist_count_q <= 6'd0;
-	id_count_q<=4'd0;
+        dist_count_q <= 5'd0;
+	      id_count_q<=4'd0;
+        block_count_q<=4'd0;
+        packet_count_q<=8'd0;
     end else begin
         state <= next_state;
         byte_buf_q<=byte_buf_n;
-	dist_count_q<=dist_count_n;
-	id_count_q<=id_count_n;
+	      dist_count_q<=dist_count_n;
+	      id_count_q<=id_count_n;
+        block_count_q<=block_count_n; 
+        packet_count_q<=packet_count_n;
         end
 end
+
+assign nr_packets=packet_count_q;
 
 // Combinational Logic (State Transitions and Output Logic)
 always_comb begin
@@ -150,21 +177,20 @@ always_comb begin
     fifo_in_pop = 1'b0;
     fifo_dist_push = 1'b0;
     fifo_id_push=1'b0;
+
     valid_azimuth_DDM_o = 1'b0;
     valid_flag=1'b0;
-    valid_datapoint_DDM_o=1'b0;
+    azimuth_DDM_o=16'd0;
 
-   distance_i = 16'd0;
-   id_i=4'd0;
-   id_DDM_o=4'd0;
-   distance_DDM_o=4'd0;
-   azimuth_DDM_o=16'd0;
-
-    
-    next_state = state;
+    distance_i = 16'd0; 
+    id_i=4'd0;
+  
+  next_state = state;
 	byte_buf_n=byte_buf_q;
 	dist_count_n=dist_count_q;
 	id_count_n=id_count_q;
+  block_count_n=block_count_q;
+  packet_count_n=packet_count_q;
 
     case (state)
         IDLE: begin
@@ -176,44 +202,48 @@ always_comb begin
         GET_FLAG1: begin
             if (!fifo_in_empty) begin
                 fifo_in_pop = 1;  // Pop the first byte
-		byte_buf_n=data_parser;
+		            byte_buf_n=data_parser;
                 next_state = GET_FLAG2;
             end
         end
 
         GET_FLAG2: begin
             if (!fifo_in_empty) begin
-		  fifo_in_pop = 1;
-		   next_state = GET_ANGLE1;
-                if (byte_buf_q == 8'hFF && data_parser == 8'hEE) 
-			valid_flag=1'b1;
+		          fifo_in_pop = 1;
+              if (byte_buf_q == 8'hFF && data_parser == 8'hEE)  begin
+			        valid_flag=1'b1;
+              next_state = GET_ANGLE1;
+              end else 
+                byte_buf_n=data_parser;
             end
         end
 
         GET_ANGLE1: begin
             if (!fifo_in_empty) begin
                 fifo_in_pop = 1;
-		byte_buf_n=data_parser;
+	            	byte_buf_n=data_parser;
                 next_state = GET_ANGLE2;
             end
         end
 
         GET_ANGLE2: begin
-            if (ready_ACM_i && !fifo_in_empty) begin
-		fifo_in_pop = 1;
+          if(!fifo_in_empty)  begin
+            valid_azimuth_DDM_o= 1;
+            if (ready_ACM_i ) begin
+		            fifo_in_pop = 1;
                 // When ACM is ready, push the composed angle
-                azimuth_DDM_o = {byte_buf_q, data_parser};
-                valid_azimuth_DDM_o= 1;
+                azimuth_DDM_o = {data_parser, byte_buf_q};
                 next_state = DIST_HI;
                 dist_count_n = 0; // Reset distance count
-		id_count_n=0;
+		            id_count_n=0;
             end
+          end
         end
 
         DIST_HI: begin
             if (!fifo_in_empty) begin
                 fifo_in_pop = 1;  // Pop the high byte of distance
-		byte_buf_n=data_parser;
+	            	byte_buf_n=data_parser;
                 next_state = DIST_LO;
             end
         end
@@ -221,10 +251,10 @@ always_comb begin
         DIST_LO: begin
             if (!fifo_in_empty && (!fifo_dist_full && !fifo_id_full)) begin
                 fifo_in_pop = 1'b1;  // Pop the low byte of distance
-                distance_i= {byte_buf_q, data_parser};  // Compose 16-bit distance
-		id_i=id_count_q;
+                distance_i= {data_parser, byte_buf_q};  // Compose 16-bit distance
+		            id_i=id_count_q;
                 fifo_dist_push = 1'b1;  // Push to FIFO B
-		fifo_id_push=1'b1;
+	            	fifo_id_push=1'b1;
                 next_state = SKIP_JUNK;
             end
         end
@@ -232,14 +262,24 @@ always_comb begin
         SKIP_JUNK: begin
             if (!fifo_in_empty ) begin
                 fifo_in_pop = 1;  // Discard junk byte
-                if (dist_count_q == 31) begin
-                    next_state = IDLE;  // All distances processed, go back to IDLE
+                if (dist_count_q == 31) begin //32 distances in a data block
+                    if(block_count_q == 11) begin //12 data block in a data packet
+                      next_state=IDLE;
+                      packet_count_n=packet_count_q+8'd1;
+                      block_count_n=4'd0;
+                    end
+                    else begin
+                      block_count_n = block_count_q + 4'd1;
+                      next_state=GET_FLAG1;
+                     end 
+                
                 end else begin
-                    dist_count_n = dist_count_q+ 1;
-		    id_count_n =id_count_q+1;
+                    dist_count_n = dist_count_q+ 5'd1;
+		                id_count_n =id_count_q+4'd1;
                     next_state = DIST_HI;
                 end
-            end
+            
+        end
         end
     endcase
 end
