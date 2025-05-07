@@ -3,6 +3,8 @@
 
 module TB_Lidar_DDM ();
 
+import load_stim_pkg::*;
+
 logic clk_i, rstn_i, ready_ACM_i, ready_CCM_i, valid_data_i, testmode_i;
 logic valid_datapoint_DDM, valid_azimuth_DDM;
 logic [15:0] azimuth_DDM, distance_DDM;
@@ -29,9 +31,19 @@ Lidar_DDM DUT(
 .id_DDM_o(id_DDM)
 );
 
-int num_sim=0;
-int length_sim=20;
-int pointer=18;
+int length_sim;
+int index=0;
+
+
+// Declare stimuli vectors
+logic [7:0] bytes[$];
+
+assign length_sim = $bits(bytes)/8;
+
+// Load stimuli from .txt files
+initial begin
+	load_bytes("../tb/stimuli/vlp_packet.txt", bytes);
+end
 
 initial begin
 	clk_i='0;
@@ -55,15 +67,13 @@ ready_CCM_i=1'b0;
 ready_ACM_i=1'b0;
 valid_data_i=1'b0;
 wait(rstn_i)
-ready_CCM_i=1'b1;
 ready_ACM_i=1'b1;
 
-while(num_sim<=length_sim) begin
+while(index<=length_sim) begin
 @(posedge clk_i);
 valid_data_i=1'b1;
-data_i=data[pointer];
-pointer--;
-num_sim++;
+data_i=bytes[index];
+index++;
 end
 
 $stop;
