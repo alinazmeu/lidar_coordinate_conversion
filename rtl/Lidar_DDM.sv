@@ -178,6 +178,10 @@ always_comb begin
     fifo_dist_push = 1'b0;
     fifo_id_push=1'b0;
 
+    fifo_in_flush=1'b0;
+    fifo_dist_flush=1'b0;
+    fifo_id_flush=1'b0;
+
     valid_azimuth_DDM_o = 1'b0;
     valid_flag=1'b0;
     azimuth_DDM_o=16'd0;
@@ -259,7 +263,7 @@ always_comb begin
             end
         end
 
-        SKIP_JUNK: begin
+       SKIP_JUNK: begin
             if (!fifo_in_empty ) begin
                 fifo_in_pop = 1;  // Discard junk byte
                 if (dist_count_q == 31) begin //32 distances in a data block
@@ -267,6 +271,7 @@ always_comb begin
                       next_state=IDLE;
                       packet_count_n=packet_count_q+8'd1;
                       block_count_n=4'd0;
+                      fifo_in_flush=1'b1;
                     end
                     else begin
                       block_count_n = block_count_q + 4'd1;
@@ -275,7 +280,7 @@ always_comb begin
                 
                 end else begin
                     dist_count_n = dist_count_q+ 5'd1;
-		                id_count_n =id_count_q+4'd1;
+		   id_count_n =id_count_q+4'd1;
                     next_state = DIST_HI;
                 end
             
