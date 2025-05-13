@@ -28,13 +28,13 @@ axi_stream_test::axi_stream_driver #(.DataWidth(8)) axi_tx;
 Lidar_top_level DUT(
 	.rstn_i(rstn_i),
 	.clk_i (clk_i),
-	.data_i(data_i),
-	.valid_data_i(valid_data_i),
+	.data_i(axi_if.tdata),
+	.valid_data_i(axi_if.tvalid),
 	.valid_datapoint_CCM_o(valid_datapoint_CCM_o),
 	.x_o(x_o),
 	.y_o(y_o),
 	.z_o(z_o),
-	.ready_DDM_o(ready_DDM_o),
+	.ready_DDM_o(axi_if.tready),
 	.testmode_i(testmode_i),
 	.nr_packets(nr_packets)
 );
