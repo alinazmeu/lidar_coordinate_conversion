@@ -16,6 +16,15 @@ logic ready_DDM_o;
 logic signed [17:0] x_o, y_o, z_o;
 logic [7:0] nr_packets;
 
+	// Create interface instance
+  AXI_STREAM_BUS_DV #(.DataWidth(8)) axi_if (.clk_i(clk_i));
+
+  // Virtual interface to pass to class
+virtual AXI_STREAM_BUS_DV #(.DataWidth(8)) v_axi_if = axi_if;
+
+//instance od driver object in my tb
+axi_stream_test::axi_stream_driver #(.DataWidth(8)) axi_tx;
+
 Lidar_top_level DUT(
 	.rstn_i(rstn_i),
 	.clk_i (clk_i),
@@ -64,21 +73,24 @@ end
 
 initial begin
 testmode_i=1'b1;
-valid_data_i=1'b0;
+ready_upsizer_i=1'b1;
+//valid_data_i=1'b0;
+axi_tx=new(v_axi_if);
+axi_tx.reset_tx();
 wait(rstn_i)
-
-while(index<=length_sim) begin
 @(posedge clk_i);
-valid_data_i=1'b1;
-data_i=bytes[index];
+while(index<=length_sim) begin
+axi_tx.send(bytes[index], 1'b0);
+data_i.tdata=bytes[index];
 
 if(valid_datapoint_CCM_o) begin
 	x[out_idx] = x_o;
 	y[out_idx] = y_o;
 	z[out_idx] = z_o;
-	
+	//$display("x=%d", x[out_idx] );
+
 	out_idx++;
-end
+end 
 index++;
 end
 
