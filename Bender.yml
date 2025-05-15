@@ -3,6 +3,7 @@ package:
   authors: ["Alina Zmeu <alina.zmeu@studio.unibo.it>"]
 
 dependencies:
+  axi_stream: {git: "https://github.com/pulp-platform/axi_stream.git", rev: "54891ff" }
   common_cells: {git: "https://github.com/pulp-platform/common_cells.git", version: "1.38.0" }
 
 sources:
@@ -12,6 +13,7 @@ sources:
       - rtl/Lidar_CCM.sv
       - rtl/Lidar_top_level.sv
       - rtl/Lidar_DDM.sv
+      - rtl/coordinate_serializer.sv
 
 
   - target: all(test, not(synthesis))
@@ -22,3 +24,5 @@ sources:
       - tb/TB_Lidar_CCM.sv
       - tb/TB_Lidar_DDM.sv
       - tb/TB_Lidar_top_level.sv
+      - tb/TB_Lidar_DDM_ACM.sv
+      - tb/TB_DDM_ACM_CCM.sv
