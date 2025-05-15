@@ -1,35 +1,28 @@
-module Lidar_DDM
-  (
+module Lidar_DDM (
     input logic clk_i, 
     input logic rstn_i,
 
-    ///backpressure and handshake
-    input logic ready_CCM_i,  
-    input logic ready_ACM_i, 
+    //AXI-S SIGNALS modport RX
+     input logic [7:0] data_i,
+     input logic valid_data_i,
+     output logic ready_DDM_o, //if fifo_in is not full DDM is ready to push new data
 
-    //fifo signals
-    input logic testmode_i, 
-  
-
-  //data from ethernet phy to be pushed into fifo_in
-    input logic [7:0] data_i, //to be connect to data_i pin of fifo_in
-    input logic valid_data_i, //to be connect to push_i pin of fifo_in
-
-    //2B azimuth from packet to be send to ACM module 
+    //Data and handshake with ACM module
     output logic [15:0] azimuth_DDM_o,
-    output logic valid_azimuth_DDM_o, //to notify ACM that a new azimuth from packet has been decoded 
+    output logic valid_azimuth_DDM_o, 
+    input logic ready_ACM_i, //ACM is ready when in IDLE, if low data will not be popped from fifo_in
 
-    //2B distance from fifo_distance and 4 bit id from fifo_id to be popped by CCM
+    //Data and hanshake with CCM module
     output logic [15:0] distance_DDM_o, 
     output logic [3:0] id_DDM_o,
     output logic valid_channel_DDM_o, //function of fifo_(distance, id) not empty signal
-
-    output logic ready_DDM_o,
+    input logic ready_CCM_i,  //function of fifo full signals in serializer module. If one of fifo is full CCM will not pop data from fifo_id, fifo_distance in DDM
 
     //for debugging
     output logic [7:0] nr_packets
     
   );
+
 
 //FIFO_IN control and data signals
   logic fifo_in_pop, fifo_in_flush, fifo_in_full, fifo_in_empty; //fifo_in_push is connect top valid_data_i input signal
@@ -72,9 +65,9 @@ module Lidar_DDM
     .clk_i(clk_i),
     .rst_ni(rstn_i),
     .flush_i(fifo_in_flush),
-    .testmode_i(testmode_i),
+    .testmode_i(1'b1),
     .data_i(data_i),
-    .push_i(valid_data_i), //if fifo is full and valid_data_i=1 this should cause a data drop => the depth  might be big enough to avoid this case
+    .push_i(valid_data_i), //if fifo is full and valid_data_i=1 this will cause a data drop => the depth  might be big enough to avoid this case
     .pop_i(fifo_in_pop), // there might be a backpressure from both ACM and CCM 
     .full_o(fifo_in_full),
     .empty_o(fifo_in_empty),
@@ -93,7 +86,7 @@ module Lidar_DDM
     .clk_i(clk_i),
     .rst_ni(rstn_i),
     .flush_i(fifo_dist_flush), 
-    .testmode_i(testmode_i),
+    .testmode_i(1'b1),
     .data_i(distance_i),
     .push_i(fifo_dist_push), //the push might be stopped if if full_fifo_distance=0
     .pop_i(fifo_dist_pop), 
@@ -114,7 +107,7 @@ module Lidar_DDM
     .clk_i(clk_i),
     .rst_ni(rstn_i),
     .flush_i(fifo_id_flush),
-    .testmode_i(testmode_i),
+    .testmode_i(1'b1),
     .data_i(id_i),
     .push_i(fifo_id_push),
     .pop_i(fifo_id_pop), 
@@ -124,11 +117,14 @@ module Lidar_DDM
     .data_o(id_DDM_o)
   );
 
-
-// handshakes
+//if fifos in serializer are not full, new data from fifo_id and fifo_distance can be popped and pushed in serializer fifos in the next cycle
 assign fifo_dist_pop = ready_CCM_i && !fifo_dist_empty; 
 assign fifo_id_pop = ready_CCM_i && !fifo_id_empty;
+
+
 assign valid_channel_DDM_o = !fifo_dist_empty & !fifo_id_empty;
+
+//a low ready will causes data drop
 assign ready_DDM_o=!fifo_in_full;
 
 typedef enum logic [2:0] {
@@ -263,7 +259,7 @@ always_comb begin
             end
         end
 
-       SKIP_JUNK: begin
+        SKIP_JUNK: begin
             if (!fifo_in_empty ) begin
                 fifo_in_pop = 1;  // Discard junk byte
                 if (dist_count_q == 31) begin //32 distances in a data block
@@ -280,7 +276,7 @@ always_comb begin
                 
                 end else begin
                     dist_count_n = dist_count_q+ 5'd1;
-		   id_count_n =id_count_q+4'd1;
+		                id_count_n =id_count_q+4'd1;
                     next_state = DIST_HI;
                 end
             
