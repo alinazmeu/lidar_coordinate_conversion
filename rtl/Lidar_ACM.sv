@@ -2,17 +2,17 @@
 module Lidar_ACM (
 input logic clk_i, 
 input logic rstn_i,
-input logic valid_DDM_i,
-input logic ready_fs1_CCM_i,
-input logic ready_fs2_CCM_i,
-input logic valid_fs1_CCM_i,
-input logic valid_fs2_CCM_i,
-input logic [15:0]azimuth_i, 
+
+//Data and handshake with DDM
+input logic valid_azimuth_DDM_i,
+input logic [15:0]azimuth_DDM_i, 
+output logic ready_ACM_o,
+
+//Data and communication logic with CCM
 output logic signed [17:0] cosa1_o, sina1_o, sina2_o, cosa2_o,
 output logic valid_fs1_ACM_o,
 output logic valid_fs2_ACM_o,
-output logic ready_fs1_ACM_o,
-output logic ready_fs2_ACM_o
+input logic valid_fs2_CCM_i //to move in idle state when ccm has finished to convert a data block
 );
 
 typedef enum logic[2:0] {IDLE, START, COMPUTE1, RESULT1, COMPUTE2, RESULT2, WAIT_FOR_CCM} statetype; //cs means current_state, ns means next_state
@@ -66,30 +66,26 @@ always_comb begin
 ns=cs;
 valid_fs1_ACM_o=1'd0;
 valid_fs2_ACM_o=1'd0;
-ready_fs1_ACM_o=1'd1; 
-ready_fs2_ACM_o=1'd1;
+ready_ACM_o=1'd0;
 
 case(cs) 
 	IDLE: begin  //IN ATTESA DI VALID_DDM=1 PER CAMPIONARE L'INGRESSO ED INIZIARE IL PROCESSO DI CALCOLO
-		if(valid_DDM_i) ns=START;
+	    ready_ACM_o=1'd1;
+		if(valid_azimuth_DDM_i) ns=START;
 	end
 	START: begin
-		ready_fs1_ACM_o=1'd0; 
 		ns=COMPUTE1;
 	end
 	COMPUTE1: begin
-		ready_fs1_ACM_o=1'd0; 
 		//ITER_Q=0 INIZIALIZZO, ITER_Q=[1,16] ITERO IL CORDIC, ITER_Q=17 POST-PROCESSING
 		if (iter_q==5'd17) ns=RESULT1; 
 	end
 	RESULT1: begin //I REGISTRI {SINA1, COSA1}CONTENGONO IL VALORE DA USARE NELLA CONVERSIONE DEL PRIMO FIiRNG
-		ready_fs2_ACM_o=1'd0;
 		valid_fs1_ACM_o=1'd1; //handshake con CCM che inizia la conversione del primo firing
 		ns=COMPUTE2;
 	end
 	COMPUTE2: begin // ITER_Q=0 INIZIALIZZO, ITER_Q=[1,16] ITERO IL CORDIC, ITER_Q=17 POST-PROCESSING
 		valid_fs1_ACM_o=1'd1;
-		ready_fs2_ACM_o=1'd0;
 		if(iter_q==5'd17) ns=RESULT2; 
 	end
 	RESULT2: begin
@@ -109,8 +105,7 @@ end
 // BLOCCO IN CUI CAMPIONO L'AZIMUTH 
 always_comb begin 
 azimuth_d=azimuth_q;
-if(valid_DDM_i & cs==IDLE) azimuth_d=azimuth_i; //VA BENE COS ? O LO DEVO METTERE COME SEGNALE DI ENABLE SINCRONO DEL FF ?
-else if(valid_DDM_i) azimuth_d=azimuth_i;
+if(valid_azimuth_DDM_i & cs==IDLE) azimuth_d=azimuth_DDM_i; //VA BENE COS ? O LO DEVO METTERE COME SEGNALE DI ENABLE SINCRONO DEL FF ?
 end 
 
 //PRE-PROCESSING AZIMUTH
