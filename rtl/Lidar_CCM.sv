@@ -2,20 +2,26 @@
 module Lidar_CCM (
 input logic rstn_i, 
 input logic clk_i, 
+input logic error_rx_i,
+
+//valid trigonometric functions from ACM 
 input logic valid_fs1_ACM_i,
 input logic valid_fs2_ACM_i,
-input logic ready_fs1_ACM_i,
-input logic ready_fs2_ACM_i,
-input logic valid_dp_DDM_i,
 input logic signed [17:0] sina1_i, cosa1_i, sina2_i, cosa2_i,
-input logic [3:0] channel_ID_i,
-input logic [15:0] distance_i,
-output logic valid_fs1_CCM_o,
-output logic valid_fs2_CCM_o,
-output logic ready_fs1_CCM_o,
-output logic ready_fs2_CCM_o,
-output logic valid_dp_CCM_o,
-output logic signed [17:0] x_o, y_o, z_o
+
+output logic valid_fs1_CCM_o, //this signal do not drive any logic
+output logic valid_fs2_CCM_o,// assertion of valid_fs2_CCM is used in ACM to go in IDLE 
+
+//valid ID, Distance to be popped from fifo_id, fifo_distance in DDM
+input logic valid_channel_DDM_i,
+input logic [3:0] id_DDM_i,
+input logic [15:0] distance_DDM_i,
+output logic ready_CCM_o, //drives fifo_id and fifo_distance pop signals 
+
+
+output logic valid_datapoint_CCM_o,
+output logic signed [15:0] x_o, y_o, z_o,
+input logic ready_serial_i
 );
 
 /*formula matematica 3d:          Formula di conversione nel nostro caso  :
@@ -50,6 +56,7 @@ logic signed [15:0] [15:0] LUT_sinw; // valore massimo per il dimensionamento de
 logic signed [15:0] [17:0] LUT_cosw;
 logic signed [15:0] [20:0] LUT_Z;
 
+
 assign LUT_sinw = {16'sd25881 /*sin(elevation_channel_15)*/, -16'sd1745, 16'sd22495, -16'sd5233, 16'sd19080, -16'sd8715, 16'sd15643, -16'sd12186, 16'sd12186,
  -16'sd15643, 16'sd8715, -16'sd19080, 16'sd5233, -16'sd22495, 16'sd1745, -16'sd25881 /*sin(elevation_channel_0)*/};
 
@@ -81,7 +88,7 @@ end
 always_comb begin
 cnt_dp_d=cnt_dp_q;
 if(cs==COMPUTE1 || cs==COMPUTE2) begin
-	if(valid_dp_DDM_i) cnt_dp_d=cnt_dp_q+6'd1;
+	if(valid_channel_DDM_i && ready_serial_i) cnt_dp_d=cnt_dp_q+6'd1;
 end
 end
 
@@ -89,71 +96,85 @@ always_comb begin
 ns=cs;
 valid_fs1_CCM_o=1'd0;
 valid_fs2_CCM_o=1'd0;
-ready_fs1_CCM_o=1'd1;
-ready_fs2_CCM_o=1'd1;
+ready_CCM_o=1'd1;
 clear_cnt_dp = 1'b0;
+
+if(error_rx_i) begin
+	ns  = IDLE;
+	clear_cnt_dp    = 1'b1;
+	valid_fs1_CCM_o = 1'b0;
+	valid_fs2_CCM_o = 1'b0;
+end
+
 if(cnt_dp_q==6'd16 && cs==COMPUTE1) valid_fs1_CCM_o=1'd1;
 if(cnt_dp_q==6'd32 && cs==COMPUTE2) valid_fs2_CCM_o=1'd1;
 case(cs) 
 	IDLE:     begin
+		ready_CCM_o=1'd0;
 		   if(valid_fs1_ACM_i) ns=COMPUTE1;
 	 end
 	COMPUTE1: begin
-		ready_fs1_CCM_o=1'd0;
-		if(cnt_dp_q==6'd16) begin
-			if(valid_fs2_ACM_i==1'd0) ns=WAIT_FOR_ACM;
-			else ns=COMPUTE2;
+		if(!ready_serial_i) ready_CCM_o=1'b0;
+		else begin
+			if(cnt_dp_q==6'd16) begin
+				if(valid_fs2_ACM_i==1'd0) ns=WAIT_FOR_ACM;
+				else ns=COMPUTE2;
+			end
 		
 		end
 	end
 	WAIT_FOR_ACM: begin
-		ready_fs2_CCM_o=1'd0;
 		valid_fs1_CCM_o=1'd1;
+		ready_CCM_o=1'd0;
 		if(valid_fs2_ACM_i) ns=COMPUTE2;
 	end
 	COMPUTE2: begin
-		  ready_fs2_CCM_o=1'd0;
 		valid_fs1_CCM_o=1'd1;
+		if(!ready_serial_i) ready_CCM_o=1'b0;
+		else begin
 		    if(cnt_dp_q==6'd32) begin
-			ns=IDLE;
-		valid_fs2_CCM_o=1'd1;
-		clear_cnt_dp=1'd1;
+				ns=IDLE;
+				valid_fs2_CCM_o=1'd1;
+				clear_cnt_dp=1'd1;
+			end
 		end
 	end
 endcase
 end
 
-//per ogni data point in ingresso al ciclo successivo si alza il valid
+//for each valid data in input if serializer is ready (fifo are not full) CCM can pop data 
+//as the x,y,z are processed with combinational logic. if a handshake occurs, in the next cycle there will be valid coordinates to be pushed in serializer fifos
 logic valid_dp_in;
 
-always_ff@(posedge clk_i, negedge rstn_i) begin
-if(~rstn_i) valid_dp_CCM_o<=1'd0;
-else valid_dp_CCM_o<=valid_dp_in;
+always_ff@(posedge clk_i, negedge rstn_i) begin 
+if(~rstn_i) valid_datapoint_CCM_o<=1'd0;
+else valid_datapoint_CCM_o<=valid_dp_in;
 end
+
 always_comb begin
 valid_dp_in=1'd0;
-if(cs==COMPUTE1) begin
+if(cs==COMPUTE1 && ready_serial_i) begin
 	if(cs != ns)
 		valid_dp_in = 1'b0;
 	else
-		valid_dp_in = valid_dp_DDM_i;
-end else if(cs==COMPUTE2) begin
-		valid_dp_in = valid_dp_DDM_i;
+		valid_dp_in = valid_channel_DDM_i;
+end else if(cs==COMPUTE2 && ready_serial_i) begin
+		valid_dp_in = valid_channel_DDM_i;
 	end
 end
 
 //Il calcolo delle coordinate avviene in parallelo, implemento un always_comb per ogni coordinata
-assign distance=signed'(distance_i<<1);
+assign distance=signed'(distance_DDM_i<<1);
 
 //CCORDINATA X
 always_comb begin
 x_trigonometric=36'd0;
 x_3Dformula=54'd0;
 x_normalized=71'd0;
-if(valid_dp_DDM_i)begin
+if(valid_channel_DDM_i && ready_serial_i)begin
 if (cs==COMPUTE1 || cs==COMPUTE2)  begin 
-	if(cs==COMPUTE1) x_trigonometric = signed'(LUT_cosw[channel_ID_i])*sina1_i;
-	else if(cs==COMPUTE2) x_trigonometric = signed'(LUT_cosw[channel_ID_i])*sina2_i;
+	if(cs==COMPUTE1) x_trigonometric = signed'(LUT_cosw[id_DDM_i])*sina1_i;
+	else if(cs==COMPUTE2) x_trigonometric = signed'(LUT_cosw[id_DDM_i])*sina2_i;
 	x_3Dformula  = x_trigonometric * distance;
 	x_normalized = (x_3Dformula * NORMALIZER_XY)>>>48;
 end
@@ -165,10 +186,10 @@ always_comb begin
 y_trigonometric=36'd0;
 y_3Dformula=54'd0;
 y_normalized=71'd0;
-if (valid_dp_DDM_i) begin
+if (valid_channel_DDM_i && ready_serial_i) begin
 if (cs==COMPUTE1 || cs==COMPUTE2  ) begin
-	if(cs==COMPUTE1) y_trigonometric = signed'(LUT_cosw[channel_ID_i])*cosa1_i;
-	else if(cs==COMPUTE2) y_trigonometric = signed'(LUT_cosw[channel_ID_i])*cosa2_i;
+	if(cs==COMPUTE1) y_trigonometric = signed'(LUT_cosw[id_DDM_i])*cosa1_i;
+	else if(cs==COMPUTE2) y_trigonometric = signed'(LUT_cosw[id_DDM_i])*cosa2_i;
 	y_3Dformula  = y_trigonometric* distance;
 	y_normalized = (y_3Dformula * NORMALIZER_XY)>>>48;
 	end
@@ -183,10 +204,10 @@ z_3Dformula=34'd0;
 z_corrected=35'd0;
 z_normalized_no_offset=51'd0;
 z_normalized=52'd0;
-if(valid_dp_DDM_i) begin
+if(valid_channel_DDM_i && ready_serial_i) begin
 if (cs==COMPUTE1 || cs==COMPUTE2) begin
-z_3Dformula  = signed'(LUT_sinw[channel_ID_i]) * distance;
-z_corrected= signed'(LUT_Z[channel_ID_i])+z_3Dformula;
+z_3Dformula  = signed'(LUT_sinw[id_DDM_i]) * distance;
+z_corrected= signed'(LUT_Z[id_DDM_i])+z_3Dformula;
 z_normalized_no_offset=(z_3Dformula*NORMALIZER_Z)>>>32;
 z_normalized = (z_corrected * NORMALIZER_Z)>>>32;
 end // end if
@@ -195,14 +216,14 @@ end
 
 always_ff@(posedge clk_i, negedge rstn_i) begin
 if(~rstn_i) begin
-	z_o<=18'd0;
-	y_o<=18'd0;
-	x_o<=18'd0;
+	z_o<=16'd0;
+	y_o<=16'd0;
+	x_o<=16'd0;
 	end
 else begin
-	z_o <=z_normalized_no_offset[17:0];
-	y_o <=y_normalized[17:0];
-	x_o <=x_normalized[17:0];
+	z_o <=z_normalized_no_offset[15:0];
+	y_o <=y_normalized[15:0];
+	x_o <=x_normalized[15:0];
 	end
 end
 endmodule

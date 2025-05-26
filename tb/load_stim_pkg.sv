@@ -34,7 +34,7 @@ package load_stim_pkg;
         $fclose(stim_fd);
     endtask
 
-   task load_bytes(input string stim, output logic [7:0] rx[$])
+   task load_bytes(input string stim, output logic [7:0] rx[$]);
       int ret; 
       logic [7:0] rdata;
         stim_fd = $fopen(stim, "r");
@@ -43,7 +43,7 @@ package load_stim_pkg;
             $fatal(1, "Error: Could not open stimuli file %s!", stim);
 
         while (!$feof(stim_fd)) begin
-            ret = $fscanf(stim_fd, "%h\n", rdata); //fscanf return the number of successfully scanned items, a check on ret can prevent unexpected behavior
+            ret = $fscanf(stim_fd, "%h", rdata); //fscanf return the number of successfully scanned items, a check on ret can prevent unexpected behavior
             rx.push_back(rdata); 
         end
 

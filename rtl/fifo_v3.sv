@@ -1,3 +1,17 @@
+// Copyright 2018 ETH Zurich and University of Bologna.
+// Copyright and related rights are licensed under the Solderpad Hardware
+// License, Version 0.51 (the "License"); you may not use this file except in
+// compliance with the License. You may obtain a copy of the License at
+// http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law
+// or agreed to in writing, software, hardware and materials distributed under
+// this License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+// CONDITIONS OF ANY KIND, either express or implied. See the License for the
+// specific language governing permissions and limitations under the License.
+
+// Author: Florian Zaruba <zarubaf@iis.ee.ethz.ch>
+
+`include "common_cells/assertions.svh"
+
 module fifo_v3 #(
     parameter bit          FALL_THROUGH = 1'b0, // fifo is in fall-through mode
     parameter int unsigned DATA_WIDTH   = 32,   // default data width if the fifo is of type logic
@@ -124,5 +138,15 @@ module fifo_v3 #(
             mem_q <= mem_n;
         end
     end
+
+`ifndef COMMON_CELLS_ASSERTS_OFF
+    `ASSERT_INIT(depth_0, DEPTH > 0, "DEPTH must be greater than 0.")
+
+    `ASSERT(full_write, full_o |-> ~push_i, clk_i, !rst_ni,
+            "Trying to push new data although the FIFO is full.")
+
+    `ASSERT(empty_read, empty_o |-> ~pop_i, clk_i, !rst_ni,
+            "Trying to pop data although the FIFO is empty.")
+`endif
 
 endmodule // fifo_v3
