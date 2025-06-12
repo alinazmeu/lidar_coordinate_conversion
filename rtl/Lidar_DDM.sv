@@ -17,9 +17,9 @@ module Lidar_DDM (
     output logic        valid_channel_DDM_o , //function of fifo_(distance, id) not empty signal
     input  logic        ready_CCM_i         ,  //function of fifo full signals in serializer module. If one of fifo is full CCM will not pop data from fifo_id, fifo_distance in DDM
     //for debugging
-    output logic [7:0]  nr_packets
-    
+    output logic [7:0]  nr_packets 
   );
+
   
   localparam int unsigned  FIFO_IN_DEPTH             = 32;
   localparam int unsigned  FIFO_IN_DATA_WIDTH        = 8;
@@ -39,7 +39,8 @@ module Lidar_DDM (
     GET_ANGLE2  ,   // Second byte of angle
     DIST_HI     ,      // High byte of distance
     DIST_LO     ,       // Low byte of distance
-    SKIP_JUNK    // Skip junk byte
+    SKIP_JUNK   ,
+    WAIT_LAST   // Skip junk byte
   } state_t;
 
   state_t state, next_state;
@@ -134,7 +135,6 @@ module Lidar_DDM (
     fifo_id_push        = 1'b0;
     valid_azimuth_DDM_o = 1'b0;
     valid_flag          = 1'b0;
-    error_rx_o          = 1'b0;
     azimuth_DDM_o       = 16'd0;
     distance_i          = 16'd0; 
     id_i                = 4'd0;
@@ -146,11 +146,7 @@ module Lidar_DDM (
     block_count_n  = block_count_q;
     packet_count_n = packet_count_q;
 
-    //if verified it means that phy asserted an error signal in rx so the hwa must turn in IDLE and all fifo in DDM must be flushed,
-    //all data in the path which were waiting to be processed will be dropped 
-    if ( tlast_data_i && block_count_q < 4'd11 && dist_count_q <= 5'd31 ) begin 
-      next_state    = IDLE;
-      error_rx_o    = 1'b1;
+    if(error_rx_o) begin
       block_count_n = 0;
       dist_count_n  = 0;
       fifo_dist_flush = 1'b1;
@@ -230,10 +226,15 @@ module Lidar_DDM (
                 fifo_in_pop = 1;  // Discard junk byte
                 if (dist_count_q == 31) begin //32 distances in a data block
                     if(block_count_q == 11) begin //12 data block in a data packet
-                      next_state     = IDLE;
                       packet_count_n = packet_count_q+8'd1;
                       block_count_n  = 4'd0;
-                      fifo_in_flush  = 1'b1;
+                      if ( !tlast_data_i ) begin 
+                        next_state = WAIT_LAST;
+                      end
+                      else begin 
+                        next_state = IDLE;
+                        fifo_in_flush  = 1'b1;
+                      end
                     end else begin
                       block_count_n = block_count_q + 4'd1;
                       next_state    = GET_FLAG1;
@@ -245,7 +246,25 @@ module Lidar_DDM (
                     end
              end
          end
+      WAIT_LAST: begin
+          if ( !fifo_in_empty ) begin
+              fifo_in_pop = 1'b1;  
+              if (tlast_data_i)  begin
+                 next_state=IDLE;
+                 fifo_in_flush  = 1'b1;
+                end
+           end 
+        end
      endcase
+  end
+
+  always_comb begin
+    error_rx_o='0;
+    //if verified it means that phy asserted an error signal in rx so the hwa must turn in IDLE and all fifo in DDM must be flushed,
+    //all data in the path which were waiting to be processed will be dropped 
+    if ( tlast_data_i && state != WAIT_LAST  && next_state != IDLE) begin 
+     error_rx_o = 1'b1;
+    end
   end
 
 // Sequential Logic (Registers)
@@ -266,5 +285,8 @@ always_ff @(posedge clk_i, negedge rstn_i) begin
         packet_count_q <= packet_count_n;
       end
 end
+
+assign state_out =state;
+assign ns_out = next_state;
 
 endmodule

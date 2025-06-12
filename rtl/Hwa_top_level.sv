@@ -19,15 +19,22 @@ module Hwa_top_level #(
   output axi_stream_in_rsp_t                axis_in_rsp_o  ,
   output axi_stream_out_req_t               axis_out_req_o ,
   input  axi_stream_out_rsp_t               axis_out_rsp_i ,
-  output logic [7:0]                        nr_packets 
+  output logic [7:0]                        nr_packets     ,
+  output logic [11:0]                       hwa_length_o   ,
+  output logic                              error_rx_o     
 );
 
-  assign axis_out_req_o.t.keep   =  axis_in_req_i.t.keep;
+/*   assign axis_out_req_o.t.keep   =  axis_in_req_i.t.keep;
   assign axis_out_req_o.t.strb   =  axis_in_req_i.t.strb;
   assign axis_out_req_o.t.user   =  axis_in_req_i.t.user;
   assign axis_out_req_o.t.id     =  axis_in_req_i.t.id;
-  assign axis_out_req_o.t.dest   =  axis_in_req_i.t.dest;
-  assign axis_out_req_o.t.last   =  0;
+  assign axis_out_req_o.t.dest   =  axis_in_req_i.t.dest; */
+  assign axis_out_req_o.t.keep   =  '0;
+  assign axis_out_req_o.t.strb   =  '0;
+  assign axis_out_req_o.t.user   =  '0;
+  assign axis_out_req_o.t.id     =  '0;
+  assign axis_out_req_o.t.dest   =  '0;
+  assign axis_out_req_o.t.last   =  '0;
  
 
  //packing axi_s_req/rsp for upsizer
@@ -43,7 +50,9 @@ module Hwa_top_level #(
     .data_o                 (   axis_out_req_o.t.data  ),
     .valid_serial_o         (   axis_out_req_o.tvalid  ),
     .ready_upsizer_i        (   axis_out_rsp_i.tready  ),
-    .nr_packets             (   nr_packets             )
+    .nr_packets             (   nr_packets             ),
+    .hwa_length_o           (   hwa_length_o           ),
+    .error_rx_o             (   error_rx_o             )
   );
 
 endmodule

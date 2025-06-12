@@ -3,6 +3,7 @@ module Lidar_CCM (
 input logic rstn_i, 
 input logic clk_i, 
 input logic error_rx_i,
+output logic [11:0] hwa_length_o,
 
 //valid trigonometric functions from ACM 
 input logic valid_fs1_ACM_i,
@@ -33,6 +34,7 @@ Per normalizzare il valore di sin/cos, per evitare di usare un divisore, uso una
 rimane un refuso di 2^48 per x,y e 2^32 per z che correggo con uno shift a destra di 48 e 32 bit che equivale a dividere per 2^44 e 2^26
 */
 logic signed [17:0] distance;
+logic [11:0] hwa_length_q, hwa_length_d;
 
 localparam logic signed [15:0] NORMALIZER_XY = 16'sd28147;
 localparam logic signed [16:0] NORMALIZER_Z = 17'sd42949; 
@@ -73,6 +75,25 @@ statetype cs, ns;
 always_ff @(posedge clk_i, negedge rstn_i) begin
 if(~rstn_i) cs<=IDLE;
 else cs<=ns;
+end
+
+always_ff @(posedge clk_i, negedge rstn_i) begin
+	if (~rstn_i) hwa_length_q<='0;
+	else hwa_length_q <= hwa_length_d;
+end
+
+always_comb begin
+	hwa_length_d=hwa_length_q;
+	hwa_length_o=hwa_length_q;
+	if(valid_datapoint_CCM_o) begin
+		hwa_length_d=hwa_length_q+12'd6;
+		if(error_rx_i ) begin
+			hwa_length_o=hwa_length_q+12'd6;
+			hwa_length_d = '0;
+		end
+	end
+	if(hwa_length_q == 12'd2304) 
+		hwa_length_d = '0;
 end
 
 //conta i 32 dapa point di un data block

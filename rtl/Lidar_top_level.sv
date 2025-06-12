@@ -12,7 +12,9 @@ module Lidar_top_level (
 	input  logic 							ready_upsizer_i ,
 	output logic 							valid_serial_o  ,
 	output logic signed		[15:0] 			data_o			,
-	output logic			[7:0] 			nr_packets
+	output logic			[7:0] 			nr_packets		,
+	output logic 			[11:0]			hwa_length_o	,
+	output logic							error_rx_o
 );
 
     
@@ -40,7 +42,7 @@ module Lidar_top_level (
 		.valid_data_i			( valid_data_i		),
 		.tlast_data_i			( tlast_data_i		),
 		.ready_DDM_o			( ready_DDM_o		),
-		.error_rx_o				( error_rx			),
+		.error_rx_o				( error_rx_o		),
 		.azimuth_DDM_o			( azimuth_DDM		),
 		.valid_azimuth_DDM_o	( valid_azimuth_DDM ),
 		.ready_ACM_i			( ready_ACM			),
@@ -54,7 +56,7 @@ module Lidar_top_level (
 	Lidar_ACM lidar_acm (
 		.rstn_i					( rstn_i			),
 		.clk_i 					( clk_i				),
-		.error_rx_i 			( error_rx			),
+		.error_rx_i 			( error_rx_o		),
 		.valid_azimuth_DDM_i	( valid_azimuth_DDM	),
 		.azimuth_DDM_i			( azimuth_DDM		),
 		.ready_ACM_o			( ready_ACM			),
@@ -71,7 +73,7 @@ module Lidar_top_level (
 	Lidar_CCM lidar_ccm (
 		.clk_i 					( clk_i				  ),
 		.rstn_i					( rstn_i			  ),
-		.error_rx_i 			( error_rx			  ),
+		.error_rx_i 			( error_rx_o		  ),
 		.valid_fs1_ACM_i		( valid_fs1_ACM		  ),
 		.valid_fs2_ACM_i		( valid_fs2_ACM		  ),
 		.cosa1_i 				( cosa1				  ),
@@ -88,7 +90,8 @@ module Lidar_top_level (
 		.x_o					( x					  ),
 		.y_o					( y					  ),
 		.z_o					( z					  ),
-		.valid_datapoint_CCM_o	( valid_datapoint_CCM )
+		.valid_datapoint_CCM_o	( valid_datapoint_CCM ),
+		.hwa_length_o 			( hwa_length_o		  )
 	);
 
 	coordinate_serializer parallel_to_serial (
