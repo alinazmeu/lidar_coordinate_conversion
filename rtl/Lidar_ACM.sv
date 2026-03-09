@@ -3,7 +3,8 @@ module Lidar_ACM (
 	input  logic 			   clk_i			   , 
 	input  logic 			   rstn_i			   ,
 	input  logic			   error_rx_i		   ,
-	//Data and handshake with DDM
+	input  logic [10:0]		   rpm_i			   ,
+		//Data and handshake with DDM
 	input  logic 			   valid_azimuth_DDM_i ,
 	input  logic 		[15:0] azimuth_DDM_i       , 
 	output logic 			   ready_ACM_o         ,
@@ -21,7 +22,24 @@ module Lidar_ACM (
 	statetype cs, ns;
 
 	//RISORSE PER AZIMUTH PRE-PROCESSING, CALCOLO E PRE-PROCESSING DRIFT AZIMUTH 
-	localparam logic [4:0] DRIFT_OFFSET = 5'd20; //RISOLUZIONE ANGOLARE, ASSUNZIONE RPM=600
+	logic [10:0] rpm;
+	assign rpm=rpm_i;
+	logic [5:0] drift_offset;
+
+	always_comb begin
+    case (rpm)
+        11'd300:  drift_offset = 6'd10;
+        11'd600:  drift_offset = 6'd20;
+        11'd900:  drift_offset = 6'd30;
+        11'd1200: drift_offset = 6'd40;
+        default:  drift_offset = 6'd0; // Valore di default per sicurezza
+    endcase
+end
+
+	//localparam logic [4:0] DRIFT_OFFSET_600 = 5'd20; //RISOLUZIONE ANGOLARE, ASSUNZIONE RPM=600
+	//localparam logic [4:0] DRIFT_OFFSET_300 = 5'd10; //RISOLUZIONE ANGOLARE, ASSUNZIONE RPM=300
+	//localparam logic [4:0] DRIFT_OFFSET_900 = 5'd30; //RISOLUZIONE ANGOLARE, ASSUNZIONE RPM=900
+	//localparam logic [4:0] DRIFT_OFFSET_1200 = 5'd40; //RISOLUZIONE ANGOLARE, ASSUNZIONE RPM=1200
 	localparam logic [15:0] QI   = 16'd9000;
 	localparam logic [15:0] QII  = 16'd18000;
 	localparam logic [15:0] QIII = 16'd27000;
@@ -139,7 +157,7 @@ module Lidar_ACM (
 	//CALCOLO DRIFT AZIMUTH 
 	always_comb begin
 	drift_azimuth_d=drift_azimuth_q;
-	if(cs==START) drift_azimuth_d=azimuth_q+DRIFT_OFFSET;
+	if(cs==START) drift_azimuth_d=azimuth_q+drift_offset;
 	else if (cs==COMPUTE1 && iter_q==5'd0) begin //CONTROLLO CHE NON ECCEDA I 360  
 		if(drift_azimuth_q>QIV)
 		drift_azimuth_d=drift_azimuth_q-QIV; //WRAP AROUND CON RESIDUO 

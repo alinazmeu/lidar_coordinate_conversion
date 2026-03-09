@@ -3,6 +3,7 @@ module Lidar_top_level (
 
 	input  logic 							rstn_i			, 
 	input  logic 							clk_i			, 
+	input  logic [10:0]					    rpm_i			,
     //AXIS input 
 	input  logic		    [7:0] 			data_i			,
 	input  logic							valid_data_i	,
@@ -14,14 +15,14 @@ module Lidar_top_level (
 	output logic signed		[15:0] 			data_o			,
 	output logic			[7:0] 			nr_packets		,
 	output logic 			[11:0]			hwa_length_o	,
-	output logic							error_rx_o
+	output logic							error_rx_o      
 );
 
     
 	//data and handshake between lidar_ddm and lidar_acm
 	logic		 [15:0] azimuth_DDM;
 	logic 				valid_azimuth_DDM, ready_ACM;
-	//data and control flags between lidar_acm and lidar_ccm
+	//data and control aflags between lidar_acm and lidar_ccm
 	logic signed [17:0] cosa1, sina1, cosa2, sina2;
 	logic 				valid_fs1_CCM, valid_fs2_CCM, valid_fs1_ACM, valid_fs2_ACM;
 	//data and handshake between lidar_ccm and coordinate_serializer
@@ -56,6 +57,7 @@ module Lidar_top_level (
 	Lidar_ACM lidar_acm (
 		.rstn_i					( rstn_i			),
 		.clk_i 					( clk_i				),
+		.rpm_i					( rpm_i				),
 		.error_rx_i 			( error_rx_o		),
 		.valid_azimuth_DDM_i	( valid_azimuth_DDM	),
 		.azimuth_DDM_i			( azimuth_DDM		),

@@ -15,6 +15,7 @@ module Hwa_top_level #(
 	input logic 									            rstn_i         , 
 	input logic 									            clk_i          , 
 	 // AXIS TX/RX
+  input logic [10:0]                        rpm_i          ,
   input  axi_stream_in_req_t                axis_in_req_i  ,
   output axi_stream_in_rsp_t                axis_in_rsp_o  ,
   output axi_stream_out_req_t               axis_out_req_o ,
@@ -43,6 +44,7 @@ module Hwa_top_level #(
   (
     .clk_i                  (   clk_i                  ),
     .rstn_i                 (   rstn_i                 ),
+    .rpm_i                  (   rpm_i                   ),
     .data_i                 (   axis_in_req_i.t.data   ),          
     .valid_data_i           (   axis_in_req_i.tvalid   ),
     .tlast_data_i           (   axis_in_req_i.t.last   ),
